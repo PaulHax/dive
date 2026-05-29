@@ -179,9 +179,10 @@ interface DatasetMetaMutable {
   imageEnhancements?: ImageEnhancements;
   attributes?: Readonly<Record<string, Attribute>>;
   attributeTrackFilters?: Readonly<Record<string, AttributeTrackFilter>>;
+  datasetInfo?: Record<string, string>;
   error?: string;
 }
-const DatasetMetaMutableKeys = ['attributes', 'confidenceFilters', 'timeFilters', 'imageEnhancements', 'customTypeStyling', 'customGroupStyling', 'attributeTrackFilters'];
+const DatasetMetaMutableKeys = ['attributes', 'confidenceFilters', 'timeFilters', 'imageEnhancements', 'customTypeStyling', 'customGroupStyling', 'attributeTrackFilters', 'datasetInfo'];
 
 interface DatasetMeta extends DatasetMetaMutable {
   id: Readonly<string>;
