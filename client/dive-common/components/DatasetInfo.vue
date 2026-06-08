@@ -23,7 +23,7 @@ export default defineComponent({
     const readOnlyMode = useReadOnlyMode();
     const { loadMetadata, saveMetadata } = useApi();
     const meta = ref<DatasetMeta | null>(null);
-    const customMeta = ref<Record<string, string>>({});
+    const customMeta = ref<Record<string, unknown>>({});
     const newKey = ref('');
     const newValue = ref('');
 
