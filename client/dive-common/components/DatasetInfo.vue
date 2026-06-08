@@ -4,6 +4,7 @@ import {
 } from 'vue';
 import { useDatasetId, useReadOnlyMode } from 'vue-media-annotator/provides';
 import { useApi, DatasetMeta } from 'dive-common/apispec';
+import { usePrompt } from 'dive-common/vue-utilities/prompt-service';
 import StackedVirtualSidebarContainer from 'dive-common/components/StackedVirtualSidebarContainer.vue';
 
 export default defineComponent({
@@ -22,6 +23,7 @@ export default defineComponent({
     const datasetId = useDatasetId();
     const readOnlyMode = useReadOnlyMode();
     const { loadMetadata, saveMetadata } = useApi();
+    const { prompt } = usePrompt();
     const meta = ref<DatasetMeta | null>(null);
     const customMeta = ref<Record<string, unknown>>({});
     const newKey = ref('');
@@ -69,7 +71,25 @@ export default defineComponent({
       if (!datasetId.value) {
         return;
       }
-      await saveMetadata(datasetId.value, { datasetInfo: { ...customMeta.value } });
+      try {
+        await saveMetadata(datasetId.value, { datasetInfo: { ...customMeta.value } });
+      } catch (err) {
+        const saveErr = err as { response?: { status?: number } };
+        const text = saveErr.response?.status === 403
+          ? 'You do not have permission to save metadata to this dataset.'
+          : 'Unable to save dataset metadata.';
+        // Keep the user's edits on screen and let them retry the save manually.
+        const retry = await prompt({
+          title: 'Error while Saving Metadata',
+          text,
+          positiveButton: 'Retry',
+          negativeButton: 'Dismiss',
+          confirm: true,
+        });
+        if (retry) {
+          await persist();
+        }
+      }
     };
 
     const updateEntry = (key: string, value: string) => {
