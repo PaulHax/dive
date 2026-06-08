@@ -74,7 +74,8 @@ export default defineComponent({
         await saveMetadata(datasetId.value, { datasetInfo: { ...customMeta.value } });
       } catch (err) {
         const saveErr = err as { response?: { status?: number } };
-        const text = saveErr.response?.status === 403
+        const status = saveErr.response?.status;
+        const text = status === 403 || status === 401
           ? 'You do not have permission to save metadata to this dataset.'
           : 'Unable to save dataset metadata.';
         // Keep the user's edits on screen and let them retry the save manually.
