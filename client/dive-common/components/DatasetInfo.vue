@@ -1,6 +1,6 @@
 <script lang="ts">
 import {
-  computed, defineComponent, onMounted, ref, watch,
+  computed, defineComponent, ref, watch,
 } from 'vue';
 import { useDatasetId, useReadOnlyMode } from 'vue-media-annotator/provides';
 import { useApi, DatasetMeta } from 'dive-common/apispec';
@@ -39,8 +39,7 @@ export default defineComponent({
       customMeta.value = { ...(meta.value.datasetInfo || {}) };
     };
 
-    onMounted(fetchMetadata);
-    watch(datasetId, fetchMetadata);
+    watch(datasetId, fetchMetadata, { immediate: true });
 
     const infoRows = computed(() => {
       const m = meta.value;
@@ -92,16 +91,19 @@ export default defineComponent({
       }
     };
 
-    const updateEntry = (key: string, value: string) => {
-      customMeta.value = { ...customMeta.value, [key]: value };
+    const applyMeta = (next: Record<string, unknown>) => {
+      customMeta.value = next;
       persist();
+    };
+
+    const updateEntry = (key: string, value: string) => {
+      applyMeta({ ...customMeta.value, [key]: value });
     };
 
     const removeEntry = (key: string) => {
       const next = { ...customMeta.value };
       delete next[key];
-      customMeta.value = next;
-      persist();
+      applyMeta(next);
     };
 
     const addEntry = () => {
@@ -109,10 +111,9 @@ export default defineComponent({
       if (!key) {
         return;
       }
-      customMeta.value = { ...customMeta.value, [key]: newValue.value };
+      updateEntry(key, newValue.value);
       newKey.value = '';
       newValue.value = '';
-      persist();
     };
 
     return {
@@ -151,7 +152,7 @@ export default defineComponent({
                   {{ row.name }}
                 </td>
                 <td class="wrap-text">
-                  {{ row.value !== undefined && row.value !== null ? row.value.toString() : '' }}
+                  {{ row.value?.toString() ?? '' }}
                 </td>
               </tr>
             </tbody>
