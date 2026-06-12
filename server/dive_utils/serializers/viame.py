@@ -483,6 +483,7 @@ def export_tracks_as_csv(
     typeFilter=None,
     revision=None,
     datasetInfo=None,
+    frameMetadata=None,
 ) -> Generator[str, None, None]:
     """
     Export track json to a CSV format.
@@ -495,6 +496,8 @@ def export_tracks_as_csv(
     :param typeFilter: set of track types to only export if not empty
     :param datasetInfo: per-dataset station metadata; emitted as a nested JSON entry on the
         ``# metadata`` line when non-empty (omitted entirely when empty/absent)
+    :param frameMetadata: per-frame metadata values keyed by frame number; emitted as
+        ``(frm-atr) name value`` cells on each detection row of that frame
     """
     if thresholds is None:
         thresholds = {}
@@ -566,6 +569,10 @@ def export_tracks_as_csv(
                     if track.attributes:
                         for key, val in track.attributes.items():
                             columns.append(f"(trk-atr) {key} {valueToString(val)}")
+
+                    if frameMetadata:
+                        for key, val in frameMetadata.get(feature.frame, {}).items():
+                            columns.append(f"(frm-atr) {key} {valueToString(val)}")
 
                     if feature.geometry and "FeatureCollection" == feature.geometry.type:
                         for geoJSONFeature in feature.geometry.features:

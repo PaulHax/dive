@@ -124,6 +124,25 @@ interface FrameImage {
   id?: string;
 }
 
+/** Definition of one per-frame metadata field (e.g. latitude, depth). */
+interface FrameMetadataField {
+  name: string;
+  datatype: 'text' | 'number' | 'boolean';
+  unit?: string;
+  /** Pinned fields sort first in UI displays. */
+  pinned?: boolean;
+}
+
+/**
+ * Per-frame metadata for a dataset: field definitions plus values keyed by
+ * stringified frame number, each a map of field name to value.
+ */
+interface FrameMetadata {
+  version: number;
+  fields: Record<string, FrameMetadataField>;
+  values: Record<string, Record<string, unknown>>;
+}
+
 export interface MultiCamImportFolderArgs {
   datasetName?: string; // Girder parent folder name (required on web)
   defaultDisplay: string; // In multicam the default camera to display
@@ -180,9 +199,10 @@ interface DatasetMetaMutable {
   attributes?: Readonly<Record<string, Attribute>>;
   attributeTrackFilters?: Readonly<Record<string, AttributeTrackFilter>>;
   datasetInfo?: Record<string, unknown>;
+  frameMetadataFields?: Readonly<Record<string, FrameMetadataField>>;
   error?: string;
 }
-const DatasetMetaMutableKeys = ['attributes', 'confidenceFilters', 'timeFilters', 'imageEnhancements', 'customTypeStyling', 'customGroupStyling', 'attributeTrackFilters', 'datasetInfo'];
+const DatasetMetaMutableKeys = ['attributes', 'confidenceFilters', 'timeFilters', 'imageEnhancements', 'customTypeStyling', 'customGroupStyling', 'attributeTrackFilters', 'datasetInfo', 'frameMetadataFields'];
 
 interface DatasetMeta extends DatasetMetaMutable {
   id: Readonly<string>;
@@ -219,6 +239,8 @@ interface Api {
   ): Promise<unknown>;
 
   loadMetadata(datasetId: string): Promise<DatasetMeta>;
+  /** Per-frame metadata values; optional, platforms without support omit it. */
+  loadFrameMetadata?(datasetId: string): Promise<FrameMetadata>;
   loadDetections(datasetId: string, revision?: number, set?: string): Promise<AnnotationSchemaList>;
 
   saveDetections(datasetId: string, args: SaveDetectionsArgs): Promise<unknown>;
@@ -282,6 +304,8 @@ export {
   SubType,
   PipelineParamType,
   FrameImage,
+  FrameMetadata,
+  FrameMetadataField,
   MultiTrackRecord,
   MultiGroupRecord,
   Pipe,

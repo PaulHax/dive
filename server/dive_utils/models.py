@@ -199,6 +199,16 @@ class Attribute(BaseModel):
     render: Optional[RenderingAttributes]
 
 
+class FrameMetadataField(BaseModel):
+    """Definition of one per-frame metadata field (e.g. latitude, depth)."""
+
+    name: str
+    datatype: Literal['text', 'number', 'boolean']
+    unit: Optional[str]
+    # Pinned fields sort first in UI displays
+    pinned: Optional[bool]
+
+
 class CustomStyle(BaseModel):
     color: Optional[str]
     strokeWidth: Optional[float]
@@ -238,6 +248,7 @@ class MetadataMutable(BaseModel):
     attributes: Optional[Dict[str, Attribute]]
     attributeTrackFilters: Optional[Dict[str, AttributeTrackFilter]]
     datasetInfo: Optional[Dict[str, Any]]
+    frameMetadataFields: Optional[Dict[str, FrameMetadataField]]
     fps: Optional[float]
 
     @staticmethod

@@ -1,4 +1,5 @@
 import copy
+import io
 import json
 from pathlib import Path
 from typing import Any, Dict, Generator, Iterable, List, Optional, Tuple
@@ -7,14 +8,16 @@ from bson.objectid import InvalidId, ObjectId
 import cherrypy
 from girder.constants import AccessType
 from girder.exceptions import RestException
+from girder.models.file import File
 from girder.models.folder import Folder
 from girder.models.item import Item
+from girder.models.upload import Upload
 from girder.utility import ziputil
 from pydantic.main import BaseModel
 
 from dive_server import crud, crud_annotation
 from dive_utils import TRUTHY_META_VALUES, asbool, constants, fromMeta, models, types
-from dive_utils.serializers import kwcoco
+from dive_utils.serializers import frame_metadata, kwcoco
 
 
 def get_url(dataset: types.GirderModel, item: types.GirderModel) -> str:
@@ -353,6 +356,83 @@ def update_metadata(dsFolder: types.GirderModel, data: dict, verify=True):
     return dsFolder['meta']
 
 
+def save_frame_metadata(
+    dsFolder: types.GirderModel,
+    user: types.GirderUserModel,
+    values: Dict[int, Dict[str, Any]],
+    fields: Dict[str, Dict[str, Any]],
+):
+    """Persist per-frame metadata: canonical values file plus field registry.
+
+    The values live in a ``frame_metadata.json`` item in the auxiliary folder
+    (they can scale with frame count, so they are kept out of folder meta).
+    The field registry is small and goes into folder meta so clients receive
+    it with the rest of the dataset metadata.
+    """
+    canonical = frame_metadata.to_canonical(values, fields)
+    auxiliary = crud.get_or_create_auxiliary_folder(dsFolder, user)
+    # Replace any previous canonical values file
+    for item in Folder().childItems(
+        auxiliary, filters={f'meta.{constants.FrameMetadataMarker}': True}
+    ):
+        Item().remove(item)
+    data = json.dumps(canonical).encode('utf-8')
+    new_item = Upload().uploadFromFile(
+        io.BytesIO(data),
+        len(data),
+        constants.FrameMetadataFileName,
+        parentType='folder',
+        parent=auxiliary,
+        user=user,
+        mimeType='application/json',
+    )
+    item = Item().load(new_item['itemId'], force=True)
+    item['meta'][constants.FrameMetadataMarker] = True
+    Item().save(item)
+
+    validated = {
+        key: models.FrameMetadataField(**definition).dict(exclude_none=True)
+        for key, definition in fields.items()
+    }
+    dsFolder['meta'][constants.FrameMetadataFieldsMarker] = validated
+    Folder().save(dsFolder)
+
+
+def load_frame_metadata(
+    dsFolder: types.GirderModel, user: types.GirderUserModel
+) -> Optional[Dict[str, Any]]:
+    """Load the canonical per-frame metadata document, or None if absent."""
+    root = crud.getCloneRoot(user, dsFolder)
+    # Read path: look up the auxiliary folder without creating it
+    auxiliary = next(
+        iter(
+            Folder().childFolders(
+                root, 'folder', user=user, filters={'name': constants.AuxiliaryFolderName}
+            )
+        ),
+        None,
+    )
+    if auxiliary is None:
+        return None
+    item = next(
+        iter(
+            Folder().childItems(
+                auxiliary,
+                filters={f'meta.{constants.FrameMetadataMarker}': True},
+                sort=[('created', -1)],
+            )
+        ),
+        None,
+    )
+    if item is None:
+        return None
+    file = next(iter(Item().childFiles(item)), None)
+    if file is None:
+        return None
+    file_generator = File().download(file, headers=False)()
+    return json.loads(b''.join(list(file_generator)).decode())
+
+
 class AttributeUpdateArgs(BaseModel):
     upsert: List[models.Attribute] = []
     delete: List[str] = []
@@ -646,6 +726,21 @@ def _yield_single_dataset_export(
 
     if includeDetections:
         for data in z.addFile(gen, Path(f'{zip_path}annotations.viame.csv')):
+            yield data
+
+    canonical_frame_meta = load_frame_metadata(dsFolder, user)
+    if canonical_frame_meta and canonical_frame_meta.get('values'):
+        filenames = None
+        if fromMeta(dsFolder, constants.TypeMarker) == constants.ImageSequenceType:
+            filenames = [img['name'] for img in crud.valid_images(dsFolder, user)]
+
+        def makeFrameMetadataCsv():
+            yield from frame_metadata.dump_csv(canonical_frame_meta, filenames)
+
+        for data in z.addFile(
+            makeFrameMetadataCsv,
+            Path(f'{zip_path}{constants.FrameMetadataExportFileName}'),
+        ):
             yield data
 
 

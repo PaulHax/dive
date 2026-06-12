@@ -124,6 +124,10 @@ OriginalFPSStringMarker = "originalFpsString"
 ConfidenceFiltersMarker = "confidenceFilters"
 ImageEnhancementsMarker = "imageEnhancements"
 AnnotationFileFutureProcessMarker = "importAnnotationFile"
+# Folder meta: registry of per-frame metadata field definitions
+FrameMetadataFieldsMarker = "frameMetadataFields"
+# Girder item meta: marks the canonical per-frame metadata values file
+FrameMetadataMarker = "frame_metadata"
 
 # Other constants
 TrainedPipelineCategory = "trained"
@@ -141,6 +145,10 @@ SourceFolderName = "source"
 AuxiliaryFolderName = "auxiliary"
 # the name of the meta file
 MetaFileName = "meta.json"
+# the name of the canonical per-frame metadata values file (auxiliary folder)
+FrameMetadataFileName = "frame_metadata.json"
+# per-frame metadata sidecar included in dataset zip exports
+FrameMetadataExportFileName = "frame_metadata.csv"
 # Exported multicam datasets include this file at the dataset root (see crud_dataset export).
 MultiCamJsonFileName = "multiCam.json"
 

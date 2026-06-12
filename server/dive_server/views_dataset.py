@@ -38,6 +38,7 @@ class DatasetResource(Resource):
         self.route("GET", (), self.list_datasets)
         self.route("GET", (":id",), self.get_meta)
         self.route("GET", (":id", "media"), self.get_media)
+        self.route("GET", (":id", "frame_metadata"), self.get_frame_metadata)
         self.route("GET", ("export",), self.export)
         self.route("GET", (":id", "configuration"), self.get_configuration)
         self.route("GET", (":id", "media", ":mediaId", "download"), self.download_media)
@@ -226,6 +227,18 @@ class DatasetResource(Resource):
     )
     def get_media(self, folder):
         return crud_dataset.get_media(folder, self.getCurrentUser()).dict(exclude_none=True)
+
+    @access.user
+    @autoDescribeRoute(
+        Description("Get per-frame metadata for a dataset").modelParam(
+            "id", level=AccessType.READ, **DatasetModelParam
+        )
+    )
+    def get_frame_metadata(self, folder):
+        canonical = crud_dataset.load_frame_metadata(folder, self.getCurrentUser())
+        if canonical is None:
+            return {'version': 1, 'fields': {}, 'values': {}}
+        return canonical
 
     @access.public(scope=TokenScope.DATA_READ, cookie=True)
     @autoDescribeRoute(

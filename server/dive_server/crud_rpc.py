@@ -20,7 +20,7 @@ from dive_tasks import tasks
 from dive_tasks.multicam_pipeline import is_stereo_or_multicam_pipeline, pipeline_requires_input
 from dive_utils import TRUTHY_META_VALUES, asbool, constants, fromMeta, models, types
 from dive_utils.constants import TrainingModelExtensions
-from dive_utils.serializers import dive, kpf, kwcoco, viame
+from dive_utils.serializers import dive, frame_metadata, kpf, kwcoco, viame
 
 
 class RunTrainingArgs(BaseModel):
@@ -508,6 +508,7 @@ GetDataReturnType = TypedDict(
         'annotations': Optional[types.DIVEAnnotationSchema],
         'meta': Optional[dict],
         'attributes': Optional[dict],
+        'frame_metadata': Optional[tuple],
         'type': crud.FileType,
     },
 )
@@ -535,13 +536,18 @@ def _get_data_by_type(
 
     # Discover the type of the mystery file
     if file['exts'][-1] == 'csv':
-        as_type = crud.FileType.VIAME_CSV
+        if frame_metadata.is_frame_metadata_csv(file_string.splitlines()):
+            as_type = crud.FileType.FRAME_METADATA
+        else:
+            as_type = crud.FileType.VIAME_CSV
     elif file['exts'][-1] == 'json':
         data_dict = json.loads(file_string)
         if type(data_dict) is list:
             raise RestException('No array-type json objects are supported')
         if kwcoco.is_coco_json(data_dict):
             as_type = crud.FileType.COCO_JSON
+        elif frame_metadata.is_frame_metadata_json(data_dict):
+            as_type = crud.FileType.FRAME_METADATA
         elif models.MetadataMutable.is_dive_configuration(data_dict):
             data_dict = models.MetadataMutable(**data_dict).dict(exclude_none=True)
             as_type = crud.FileType.DIVE_CONF
@@ -553,6 +559,18 @@ def _get_data_by_type(
         raise RestException('Got file of unknown and unusable type')
 
     # Parse the file as the now known type
+    if as_type == crud.FileType.FRAME_METADATA:
+        if file['exts'][-1] == 'csv':
+            values, fields, warnings = frame_metadata.load_csv(file_string.splitlines(), image_map)
+        else:
+            values, fields, warnings = frame_metadata.load_json(data_dict, image_map)
+        return {
+            'annotations': None,
+            'meta': None,
+            'attributes': None,
+            'frame_metadata': (values, fields),
+            'type': as_type,
+        }, warnings
     if as_type == crud.FileType.VIAME_CSV:
         converted, attributes, warnings, fps = viame.load_csv_as_tracks_and_attributes(
             file_string.splitlines(), image_map
@@ -676,6 +694,9 @@ def process_items(
             crud.saveImportAttributes(folder, results['attributes'], user)
         if results['meta']:
             crud_dataset.update_metadata(folder, results['meta'], False)
+        if results.get('frame_metadata'):
+            values, fields = results['frame_metadata']
+            crud_dataset.save_frame_metadata(folder, user, values, fields)
     return aggregate_warnings
 
 

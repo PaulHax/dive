@@ -163,6 +163,7 @@ This information provides the specification for an individual dataset.  It consi
 * Preset confidence filters for those types are defined in `confidenceFilters`
 * Track and Detection attribute specifications are defined in `attributes`
 * Free-form, dataset-level metadata (cruise id, station id, location, …) is stored in `datasetInfo` as a key/value object. It is edited from the [Dataset Info panel](UI-DatasetInfo.md) and included in [VIAME CSV](#viame-csv) export.
+* Per-frame metadata field definitions (name, datatype, optional unit and pinned flag) are stored in `frameMetadataFields`. The values themselves are kept in a separate `frame_metadata.json` file because they scale with frame count; see the [Frame Info panel](UI-FrameInfo.md).
 
 The full [DatasetMetaMutable definition can be found here](https://github.com/Kitware/dive/blob/main/client/dive-common/apispec.ts).
 
@@ -175,6 +176,7 @@ interface DatasetMetaMutable {
   imageEnhancments?: ImageEnhancements;
   attributes?: Readonly<Record<string, Attribute>>;
   datasetInfo?: Record<string, unknown>;
+  frameMetadataFields?: Readonly<Record<string, FrameMetadataField>>;
 }
 ```
 
@@ -200,6 +202,21 @@ entry:
 * This is how dataset context, for example a `gfishsite_id` used to re-link
   annotations to an external database, travels with the exported annotations without
   renaming files. See the [Dataset Info panel](UI-DatasetInfo.md) for how to populate it.
+
+### Per-frame metadata on detection rows
+
+When a dataset has [per-frame metadata](UI-FrameInfo.md), each exported detection row
+carries that frame's values as trailing `(frm-atr) name value` cells, following the
+same convention as `(atr)` detection attributes and `(trk-atr)` track attributes:
+
+```
+1,DSC_0001.jpg,0,884,510,1219,737,0.9,-1,rockfish,0.9,(frm-atr) depth_m 102.5,(frm-atr) latitude 36.61
+```
+
+This links the environmental context of each frame directly to the predictions in a
+single flat file. The cells are ignored on annotation re-import, so round-tripping a
+CSV through DIVE is safe. Full dataset (zip) exports additionally include a
+`frame_metadata.csv` sidecar with one row per frame.
 
 ## KWIVER Packet Format (KPF)
 

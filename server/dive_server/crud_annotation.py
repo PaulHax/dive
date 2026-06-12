@@ -168,6 +168,14 @@ def get_annotation_csv_generator(
     thresholds = fromMeta(folder, "confidenceFilters", {})
     datasetInfo = fromMeta(folder, "datasetInfo", {})
 
+    frameMetadata = None
+    canonical_frame_meta = crud_dataset.load_frame_metadata(folder, user)
+    if canonical_frame_meta and canonical_frame_meta.get('values'):
+        # canonical values are keyed by stringified frame number
+        frameMetadata = {
+            int(frame): record for frame, record in canonical_frame_meta['values'].items()
+        }
+
     def downloadGenerator():
         datalist = TrackItem().list(folder, revision=revision)
         for data in viame.export_tracks_as_csv(
@@ -179,6 +187,7 @@ def get_annotation_csv_generator(
             typeFilter=typeFilter,
             revision=revision,
             datasetInfo=datasetInfo,
+            frameMetadata=frameMetadata,
         ):
             yield data
 
