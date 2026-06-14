@@ -51,15 +51,17 @@ flag):
 
 Re-importing replaces the dataset's existing per-frame metadata.
 
+The panel works on both the web and desktop versions.
+
 ## Storage and export
 
-* Values are stored in a `frame_metadata.json` file in the dataset's
-  auxiliary folder and served by `GET dive_dataset/{id}/frame_metadata`.
-  The field registry is stored in the dataset's
-  [configuration](DataFormats.md#dive-configuration-json) under
-  `frameMetadataFields`.
+* Values are stored in a `frame_metadata.json` file — in the dataset's
+  auxiliary folder on the web (served by `GET dive_dataset/{id}/frame_metadata`),
+  or in the project directory on desktop. The field registry is stored in the
+  dataset's [configuration](DataFormats.md#dive-configuration-json) under
+  `frameMetadataFields` on both platforms.
 * VIAME CSV exports inline each frame's metadata onto its detection rows as
   `(frm-atr) name value` cells, linking metadata directly to predictions.
   See [VIAME CSV](DataFormats.md#viame-csv).
-* Full dataset (zip) exports include a `frame_metadata.csv` sidecar that can
-  be re-imported directly.
+* On the web, full dataset (zip) exports also include a `frame_metadata.csv`
+  sidecar that can be re-imported directly.

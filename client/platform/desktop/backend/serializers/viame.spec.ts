@@ -350,6 +350,62 @@ describe('VIAME datasetInfo passthrough', () => {
   });
 });
 
+function getFrameMetadataFieldsEntry(output: string[]): Record<string, unknown> | null {
+  const fields = getMetadataFields(output);
+  if (fields === null) {
+    return null;
+  }
+  const entry = fields.find((field) => field.startsWith('frameMetadataFields: '));
+  return entry ? JSON.parse(entry.slice('frameMetadataFields: '.length)) : null;
+}
+
+describe('VIAME per-frame metadata passthrough', () => {
+  const frameMetadata = {
+    version: 1,
+    fields: {
+      depth_m: { name: 'depth_m', datatype: 'number' as const, unit: 'm' },
+      substrate: { name: 'substrate', datatype: 'text' as const },
+    },
+    values: {
+      0: { depth_m: 102.5, substrate: 'sand' },
+    },
+  };
+
+  it('emits (frm-atr) cells on detection rows of frames that have metadata', async () => {
+    const path = '/home/test.json';
+    const stream = fs.createWriteStream(path);
+    // On export the field registry is read from meta (set at import); the
+    // per-frame values are passed alongside and emitted onto detection rows.
+    const metaWithFields = { ...meta, frameMetadataFields: frameMetadata.fields } as JsonMeta;
+    await serialize(stream, data, metaWithFields, new Set<string>(), {
+      excludeBelowThreshold: false,
+      header: true,
+    }, frameMetadata);
+    const output = fs.readFileSync(path).toString().split('\n');
+    const rows = output
+      .filter((line) => line && !line.startsWith('#'))
+      .map((line) => (parseSync(line) as string[][])[0]);
+    const frameZeroRow = rows.find((row) => row[2] === '0');
+    expect(frameZeroRow).toBeDefined();
+    expect(frameZeroRow).toContain('(frm-atr) depth_m 102.5');
+    expect(frameZeroRow).toContain('(frm-atr) substrate sand');
+    // field definitions ride along on the # metadata header line
+    expect(getFrameMetadataFieldsEntry(output)).toEqual(frameMetadata.fields);
+  });
+
+  it('omits (frm-atr) cells and the header entry when no frame metadata is given', async () => {
+    const path = '/home/test.json';
+    const stream = fs.createWriteStream(path);
+    await serialize(stream, data, meta, new Set<string>(), {
+      excludeBelowThreshold: false,
+      header: true,
+    });
+    const output = fs.readFileSync(path).toString();
+    expect(output).not.toContain('(frm-atr)');
+    expect(getFrameMetadataFieldsEntry(output.split('\n'))).toBeNull();
+  });
+});
+
 describe('Test Image Filenames', () => {
   it('testing image filenames', async () => {
     const imageMap = new Map([

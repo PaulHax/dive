@@ -180,6 +180,9 @@ beforeEach(() => {
         'foreign.meta.json': '{ "confidenceFilters": {"default": 0.8}, "type": "invalidtype" }',
         // This file will be migrated
         'dive.json': '{ "0": { "trackId": 0 } }', // fake track file
+        'frame_metadata.csv': 'frame,depth_m,substrate\n0,102.5,sand\n1,103.1,rock',
+        'frame_metadata_byfile.csv': 'filename,altitude_m\nimage1.png,2.1\nimage2.png,2.0',
+        'frame_metadata_values.json': '{ "frameMetadata": { "0": { "salinity": 34.5 } } }',
       },
       imageSuccess: {
         'foo.png': '',
@@ -584,6 +587,49 @@ describe('native.common', () => {
     const meta2 = await common.loadMetadata(settings, final.id, urlMapper);
     expect(meta2.confidenceFilters).toStrictEqual({ default: 0.8 });
     expect(meta2.type).toBe('image-sequence'); // Ensure meta import cannot change immutable fields.
+  });
+
+  it('imports per-frame metadata without creating annotations and round-trips it', async () => {
+    const payload = await common.beginMediaImport(
+      '/home/user/data/imageLists/success/image_list.txt',
+    );
+    const res = await common.finalizeMediaImport(settings, payload);
+    const final = res.meta;
+
+    // A frame-keyed CSV imports values + inferred fields, no tracks created
+    await common.dataFileImport(settings, final.id, '/home/user/data/annotationImport/frame_metadata.csv');
+    const annotations = await common.loadDetections(settings, final.id);
+    expect(Object.keys(annotations.tracks)).toHaveLength(0);
+
+    const frameMeta = await common.loadFrameMetadata(settings, final.id);
+    expect(frameMeta.values['0']).toStrictEqual({ depth_m: 102.5, substrate: 'sand' });
+    expect(frameMeta.values['1']).toStrictEqual({ depth_m: 103.1, substrate: 'rock' });
+    expect(frameMeta.fields.depth_m.datatype).toBe('number');
+
+    const meta = await common.loadMetadata(settings, final.id, urlMapper);
+    expect(meta.frameMetadataFields?.substrate.datatype).toBe('text');
+
+    // A filename-keyed CSV resolves names against the dataset image map.
+    // Frame ordering depends on the image list sort, so assert order-independently.
+    await common.dataFileImport(settings, final.id, '/home/user/data/annotationImport/frame_metadata_byfile.csv');
+    const merged = await common.loadFrameMetadata(settings, final.id);
+    const byfileRecords = Object.values(merged.values);
+    expect(byfileRecords).toContainEqual({ altitude_m: 2.1 });
+    expect(byfileRecords).toContainEqual({ altitude_m: 2.0 });
+
+    // A {frameMetadata: {...}} json values document imports too
+    await common.dataFileImport(settings, final.id, '/home/user/data/annotationImport/frame_metadata_values.json');
+    const fromJson = await common.loadFrameMetadata(settings, final.id);
+    expect(fromJson.values['0']).toStrictEqual({ salinity: 34.5 });
+
+    // Export emits (frm-atr) cells for frames that have metadata
+    await common.dataFileImport(settings, final.id, '/home/user/data/annotationImport/frame_metadata.csv');
+    const exportPath = '/home/user/output/export.csv';
+    await common.exportDataset(settings, {
+      id: final.id, exclude: false, path: exportPath, typeFilter: new Set<string>(), type: 'csv',
+    });
+    const exported = fs.readFileSync(exportPath).toString();
+    expect(exported).toContain('frameMetadataFields:');
   });
 
   it('import with CSV annotations without specifying track file', async () => {

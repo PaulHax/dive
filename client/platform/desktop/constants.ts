@@ -14,6 +14,7 @@ export const JobsFolderName = 'DIVE_Jobs';
 export const JobsOutputFolderName = 'DIVE_Jobs_Output';
 export const PipelinesFolderName = 'DIVE_Pipelines';
 export const LastCalibrationFileName = 'last_calibration.json';
+export const FrameMetadataFileName = 'frame_metadata.json';
 
 export interface Settings {
   // version a schema version

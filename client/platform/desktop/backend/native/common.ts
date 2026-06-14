@@ -18,7 +18,7 @@ import { GroupData } from 'vue-media-annotator/Group';
 import {
   DatasetType, Pipelines, SaveDetectionsArgs,
   FrameImage, DatasetMetaMutable, TrainingConfig, TrainingConfigs, SaveAttributeArgs,
-  MultiCamMedia,
+  FrameMetadata, MultiCamMedia,
   DatasetMetaMutableKeys,
   AnnotationSchema,
   SaveAttributeTrackFilterArgs,
@@ -27,6 +27,7 @@ import {
   PipelineParamType,
 } from 'dive-common/apispec';
 import * as viameSerializers from 'platform/desktop/backend/serializers/viame';
+import * as frameMetadataSerializers from 'platform/desktop/backend/serializers/frameMetadata';
 import * as nistSerializers from 'platform/desktop/backend/serializers/nist';
 import * as dive from 'platform/desktop/backend/serializers/dive';
 import * as coco from 'platform/desktop/backend/serializers/coco';
@@ -43,7 +44,7 @@ import {
   RunTraining, ExportDatasetArgs, DesktopMediaImportResponse,
   ExportConfigurationArgs, JobsFolderName, JobsOutputFolderName, ProjectsFolderName,
   PipelinesFolderName, ConversionArgs,
-  JobType, LastCalibrationFileName,
+  JobType, LastCalibrationFileName, FrameMetadataFileName,
 } from 'platform/desktop/constants';
 import {
   cleanString, filterByGlob, makeid, strNumericCompare,
@@ -699,9 +700,47 @@ async function saveMetadata(settings: Settings, datasetId: string, args: Dataset
   if (args.datasetInfo) {
     existing.datasetInfo = args.datasetInfo;
   }
+  if (args.frameMetadataFields) {
+    existing.frameMetadataFields = args.frameMetadataFields;
+  }
 
   await _saveAsJson(projectDirInfo.metaFileAbsPath, existing);
   await release();
+}
+
+/**
+ * Persist per-frame metadata: the canonical values document goes to
+ * frame_metadata.json in the project directory (it scales with frame count,
+ * so it stays out of meta.json), while the field registry is set on meta by
+ * the caller.
+ */
+async function _saveFrameMetadata(
+  settings: Settings,
+  datasetId: string,
+  values: frameMetadataSerializers.FrameMetadataValues,
+  fields: frameMetadataSerializers.FrameMetadataFields,
+) {
+  const projectInfo = getProjectDir(settings, datasetId);
+  const canonical = frameMetadataSerializers.toCanonical(values, fields);
+  await _saveAsJson(npath.join(projectInfo.basePath, FrameMetadataFileName), canonical);
+}
+
+/**
+ * Load the canonical per-frame metadata document, or an empty one if absent.
+ * Field definitions stored on meta.json take precedence over the file copy.
+ */
+async function loadFrameMetadata(settings: Settings, datasetId: string): Promise<FrameMetadata> {
+  const projectDirData = await getValidatedProjectDir(settings, datasetId);
+  const framePath = npath.join(projectDirData.basePath, FrameMetadataFileName);
+  let canonical = frameMetadataSerializers.emptyFrameMetadata();
+  if (await fs.pathExists(framePath)) {
+    canonical = await _loadAsJson(framePath) as FrameMetadata;
+  }
+  const meta = await loadJsonMetadata(projectDirData.metaFileAbsPath);
+  if (meta.frameMetadataFields) {
+    canonical.fields = { ...canonical.fields, ...meta.frameMetadataFields };
+  }
+  return canonical;
 }
 
 async function saveAttributes(settings: Settings, datasetId: string, args: SaveAttributeArgs) {
@@ -769,6 +808,8 @@ async function _ingestFilePath(
   let annotations = dive.makeEmptyAnnotationFile();
   const meta: DatasetMetaMutable & { fps?: number, execTime?: number } = {};
   let metadataConfig = false;
+  // Per-frame metadata files carry no annotations; skip the annotation save below.
+  let frameMetadataImport = false;
   if (JsonFileName.test(path)) {
     const jsonObject = await _loadAsJson(path);
     if (nistSerializers.confirmNistFormat(jsonObject)) {
@@ -777,6 +818,13 @@ async function _ingestFilePath(
       annotations.tracks = data.tracks;
       annotations.groups = data.groups;
       meta.fps = data.fps;
+    } else if (frameMetadataSerializers.isFrameMetadataJson(jsonObject)) {
+      // Per-frame metadata values document
+      const parsed = frameMetadataSerializers.loadJson(jsonObject, imageMap);
+      await _saveFrameMetadata(settings, datasetId, parsed.values, parsed.fields);
+      meta.frameMetadataFields = parsed.fields;
+      warnings = warnings.concat(parsed.warnings);
+      frameMetadataImport = true;
     } else if (DatasetMetaMutableKeys.some((key) => key in jsonObject)) {
       // DIVE Json metadata config file
       merge(meta, pick(jsonObject, DatasetMetaMutableKeys));
@@ -791,13 +839,23 @@ async function _ingestFilePath(
       annotations = await loadAnnotationFile(path);
     }
   } else if (CsvFileName.test(path)) {
-    // VIAME CSV File
-    const data = await viameSerializers.parseFile(path, imageMap);
-    annotations.tracks = data[0].tracks;
-    annotations.groups = data[0].groups;
-    meta.fps = data[0].fps;
-    meta.execTime = data[0].execTime;
-    [, warnings] = data;
+    const csvText = await fs.readFile(path, 'utf-8');
+    if (frameMetadataSerializers.isFrameMetadataCsv(csvText)) {
+      // Per-frame metadata table (header with a frame or filename key column)
+      const parsed = frameMetadataSerializers.loadCsv(csvText, imageMap);
+      await _saveFrameMetadata(settings, datasetId, parsed.values, parsed.fields);
+      meta.frameMetadataFields = parsed.fields;
+      warnings = warnings.concat(parsed.warnings);
+      frameMetadataImport = true;
+    } else {
+      // VIAME CSV File
+      const data = await viameSerializers.parseFile(path, imageMap);
+      annotations.tracks = data[0].tracks;
+      annotations.groups = data[0].groups;
+      meta.fps = data[0].fps;
+      meta.execTime = data[0].execTime;
+      [, warnings] = data;
+    }
   } else if (YAMLFileName.test(path)) {
     annotations = await kpf.parse([path]);
   }
@@ -831,7 +889,8 @@ async function _ingestFilePath(
     const processed = processTrackAttributes(Object.values(annotations.tracks));
     meta.attributes = processed.attributes;
   }
-  if (!metadataConfig) { // Only save Annotations when not a metadata Config file
+  if (!metadataConfig && !frameMetadataImport) {
+    // Only save Annotations when not a metadata config or frame metadata file
     await _saveSerialized(settings, datasetId, annotations, true);
   }
 
@@ -1312,6 +1371,11 @@ async function dataFileImport(settings: Settings, id: string, path: string, addi
     additivePrepend,
   );
   merge(jsonMeta, result.meta);
+  // A per-frame metadata import replaces the field registry wholesale (the
+  // values file was already replaced); a deep merge would leak stale fields.
+  if (result.meta.frameMetadataFields) {
+    jsonMeta.frameMetadataFields = result.meta.frameMetadataFields;
+  }
   await _saveAsJson(npath.join(projectDirData.basePath, JsonMetaFileName), jsonMeta);
   return result;
 }
@@ -1504,10 +1568,11 @@ async function exportDataset(settings: Settings, args: ExportDatasetArgs) {
       excludeBelowThreshold: args.exclude,
     });
   }
+  const frameMetadata = await loadFrameMetadata(settings, args.id);
   return viameSerializers.serializeFile(args.path, data, meta, args.typeFilter, {
     excludeBelowThreshold: args.exclude,
     header: true,
-  });
+  }, frameMetadata);
 }
 
 async function exportConfiguration(settings: Settings, args: ExportConfigurationArgs) {
@@ -1606,6 +1671,7 @@ export {
   loadJsonMetadata,
   loadAnnotationFile,
   loadDetections,
+  loadFrameMetadata,
   openLink,
   ingestDataFiles,
   saveDetections,

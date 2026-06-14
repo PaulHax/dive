@@ -172,6 +172,11 @@ export default function register() {
     return ret;
   });
 
+  ipcMain.handle('load-frame-metadata', async (event, { datasetId }: { datasetId: string }) => {
+    const ret = await common.loadFrameMetadata(settings.get(), datasetId);
+    return ret;
+  });
+
   ipcMain.handle('import-multicam-media', async (event, { args }:
     { args: MultiCamImportArgs }) => {
     const ret = await beginMultiCamImport(args);

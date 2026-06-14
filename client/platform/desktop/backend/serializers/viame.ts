@@ -11,7 +11,9 @@ import moment from 'moment';
 import { cloneDeep, flattenDeep, isEmpty } from 'lodash';
 import { pipeline, Readable, Writable } from 'stream';
 
-import { AnnotationSchema, MultiGroupRecord, MultiTrackRecord } from 'dive-common/apispec';
+import {
+  AnnotationSchema, FrameMetadata, MultiGroupRecord, MultiTrackRecord,
+} from 'dive-common/apispec';
 import { JsonMeta } from 'platform/desktop/constants';
 import { splitExt } from 'platform/desktop/backend/native/utils';
 // Imports that involve actual code require relative imports because ts-node barely works
@@ -32,6 +34,7 @@ const FpsRegex = /fps:\s*(\d+(\.\d+)?)/ig;
 const ExecTimeRegEx = /exec_time:\s*(\d+(\.\d+)?)/ig;
 const AtrToken = '(atr)';
 const TrackAtrToken = '(trk-atr)';
+const FrameAtrToken = '(frm-atr)';
 const PolyToken = '(poly)';
 const KeypointToken = '(kp)';
 const NoteToken = '(note)';
@@ -526,7 +529,12 @@ async function writeHeader(writer: Writable, meta: JsonMeta) {
   const datasetInfo = meta.datasetInfo && !isEmpty(meta.datasetInfo)
     ? meta.datasetInfo
     : undefined;
-  if (meta.fps || datasetInfo) {
+  /* Per-frame metadata field definitions ride along the same way, so import can
+   * reconstruct the registry. Unknown `# metadata` keys are ignored on parse. */
+  const frameMetadataFields = meta.frameMetadataFields && !isEmpty(meta.frameMetadataFields)
+    ? meta.frameMetadataFields
+    : undefined;
+  if (meta.fps || datasetInfo || frameMetadataFields) {
     const metadataRow = [
       '# metadata',
       `fps: ${meta.fps}`,
@@ -538,6 +546,9 @@ async function writeHeader(writer: Writable, meta: JsonMeta) {
     }
     if (datasetInfo) {
       metadataRow.push(`datasetInfo: ${JSON.stringify(datasetInfo)}`);
+    }
+    if (frameMetadataFields) {
+      metadataRow.push(`frameMetadataFields: ${JSON.stringify(frameMetadataFields)}`);
     }
     writer.write(metadataRow);
   }
@@ -552,6 +563,7 @@ async function serialize(
     excludeBelowThreshold: false,
     header: true,
   },
+  frameMetadata: FrameMetadata | undefined = undefined,
 ): Promise<void> {
   const stringify = csvstringify();
   return new Promise((resolve, reject) => {
@@ -618,6 +630,15 @@ async function serialize(
             Object.entries(track.attributes || {}).forEach(([key, val]) => {
               row.push(`${TrackAtrToken} ${key} ${val}`);
             });
+            /* Per-frame Metadata: this frame's values, linking metadata to predictions */
+            if (frameMetadata) {
+              const frameValues = frameMetadata.values[`${feature.frame}`];
+              if (frameValues) {
+                Object.entries(frameValues).forEach(([key, val]) => {
+                  row.push(`${FrameAtrToken} ${key} ${val}`);
+                });
+              }
+            }
 
             /* Geometry */
             if (feature.geometry && feature.geometry.type === 'FeatureCollection') {
@@ -662,9 +683,10 @@ async function serializeFile(
     excludeBelowThreshold: false,
     header: true,
   },
+  frameMetadata: FrameMetadata | undefined = undefined,
 ) {
   const stream = fs.createWriteStream(path);
-  await serialize(stream, data, meta, typeFilter, options);
+  await serialize(stream, data, meta, typeFilter, options, frameMetadata);
   return path;
 }
 

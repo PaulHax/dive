@@ -1,7 +1,7 @@
 import axios, { AxiosInstance } from 'axios';
 
 import type {
-  DatasetMetaMutable, DatasetType, MultiCamImportArgs,
+  DatasetMetaMutable, DatasetType, FrameMetadata, MultiCamImportArgs,
   Pipe, Pipelines, PipelineParams, SaveAttributeArgs,
   SaveAttributeTrackFilterArgs, SaveDetectionsArgs, TrainingConfigs,
 } from 'dive-common/apispec';
@@ -323,6 +323,10 @@ async function loadDetections(datasetId: string) {
   };
 }
 
+async function loadFrameMetadata(datasetId: string): Promise<FrameMetadata> {
+  return window.diveDesktop.invoke('load-frame-metadata', { datasetId });
+}
+
 async function saveMetadata(id: string, args: DatasetMetaMutable) {
   const client = await getClient();
   return client.post(`dataset/${id}/meta`, args);
@@ -355,6 +359,7 @@ export {
   /* Standard Specification APIs */
   loadMetadata,
   loadDetections,
+  loadFrameMetadata,
   getPipelineList,
   deleteTrainedPipeline,
   runPipeline,
