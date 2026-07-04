@@ -20,7 +20,7 @@ interface ComponentMapItem {
 }
 
 const state: ContextState = reactive({
-  last: 'TypeThreshold',
+  last: 'DatasetInfo',
   active: null,
   subCategory: null,
 });
@@ -67,7 +67,7 @@ function unregister(item: ComponentMapItem) {
 }
 
 function resetActive() {
-  state.last = 'TypeThreshold';
+  state.last = 'DatasetInfo';
   state.active = null;
 }
 
