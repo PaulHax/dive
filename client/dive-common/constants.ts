@@ -82,6 +82,16 @@ const largeImageTypes = [
   'image/ntf',
 ];
 
+/** Extension-only formats for basic image sequences (aligned with server validImageFormats). */
+const basicImageFileExtensions = [
+  'png',
+  'jpg',
+  'jpeg',
+  'sgi',
+  'bmp',
+  'pgm',
+];
+
 /** Extension-only formats for large-image uploads (aligned with server validLargeImageFormats). */
 const largeImageFileExtensions = [
   'nitf',
@@ -204,6 +214,7 @@ export {
   websafeVideoTypes,
   inputAnnotationTypes,
   largeImageTypes,
+  basicImageFileExtensions,
   largeImageFileExtensions,
   largeImageDesktopTypes,
   largeImageWebAccept,
