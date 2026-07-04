@@ -4,7 +4,7 @@ import type {
   DatasetMetaMutable, DatasetType, MultiCamImportArgs,
   Pipe, Pipelines, PipelineParams, SaveAttributeArgs,
   SaveAttributeTrackFilterArgs, SaveDetectionsArgs, TrainingConfigs,
-  DatasetCalibrationResult,
+  DatasetCalibrationResult, ResolvedFrameMetadata,
   SegmentationPredictRequest, SegmentationPredictResponse, SegmentationStatusResponse,
   SegmentationStereoSegmentRequest, SegmentationStereoSegmentResponse,
   TextQueryRequest, TextQueryResponse, RefineDetectionsRequest, RefineDetectionsResponse,
@@ -609,6 +609,12 @@ async function loadDetections(datasetId: string) {
   };
 }
 
+// The backend runs the shared resolver and returns the compact per-camera payload, so raw
+// multi-MB sidecar text never crosses the IPC wire.
+function loadFrameMetadata(datasetId: string): Promise<ResolvedFrameMetadata> {
+  return window.diveDesktop.invoke('load-frame-metadata', { datasetId });
+}
+
 async function saveMetadata(id: string, args: DatasetMetaMutable) {
   const client = await getClient();
   return client.post(`dataset/${id}/meta`, args);
@@ -669,6 +675,7 @@ export {
   /* Standard Specification APIs */
   loadMetadata,
   loadDetections,
+  loadFrameMetadata,
   getPipelineList,
   deleteTrainedPipeline,
   runPipeline,
