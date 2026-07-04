@@ -1,7 +1,7 @@
 import type { GirderModel } from '@girder/components/src';
 
 import {
-  DatasetMetaMutable, FrameImage, SaveAttributeArgs, SaveAttributeTrackFilterArgs,
+  DatasetMetaMutable, DatasetType, FrameImage, SaveAttributeArgs, SaveAttributeTrackFilterArgs,
 } from 'dive-common/apispec';
 import { calibrationFileMarker, jsonCalibrationFileMarker } from 'dive-common/constants';
 import { parentDatasetId } from 'dive-common/compositeDatasetId';
@@ -173,12 +173,26 @@ async function saveMetadata(datasetId: string, metadata: DatasetMetaMutable) {
   return girderRest.patch(`/dive_dataset/${folderId}`, metadata);
 }
 
-interface ValidationResponse {
-  ok: boolean;
-  type: 'video' | 'image-sequence';
+export interface ValidatedUploadRoleMap {
   media: string[];
   annotations: string[];
+  datasetConfig: string[];
+  frameMetadata: string[];
+}
+
+export interface IgnoredUploadFile {
+  name: string;
+  reason: string;
+}
+
+export interface ValidationResponse {
+  ok: boolean;
+  // Empty string when validation fails (no single media type could be determined).
+  type: DatasetType | '';
   message: string;
+  roles: ValidatedUploadRoleMap;
+  upload: string[];
+  ignored: IgnoredUploadFile[];
 }
 
 function validateUploadGroup(names: string[]) {
