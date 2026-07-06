@@ -33,7 +33,7 @@ import {
   ResolvedFrameMetadata,
   SingleCameraFrameMetadataKey,
 } from 'dive-common/apispec';
-import { isFrameMetadataSourceName } from 'dive-common/frameMetadata/naming';
+import isFrameMetadataSourceName from 'dive-common/frameMetadata/naming';
 import { buildMediaKeyIndex, resolveCameras } from 'dive-common/frameMetadata/resolve';
 import type { CameraCandidateTexts, CameraMediaKeys } from 'dive-common/frameMetadata/resolve';
 import { parentDatasetId } from 'dive-common/compositeDatasetId';
