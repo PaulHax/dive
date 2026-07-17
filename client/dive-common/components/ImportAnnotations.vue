@@ -199,7 +199,7 @@ export default defineComponent({
             await reloadAnnotations();
             // Importing a reserved-name frame-metadata.csv/.txt through this path creates an
             // in-viewer sidecar; drop the session cache so the Frame Metadata panel shows it
-            // without a viewer reload, matching the explicit Import Frame Metadata button.
+            // without a viewer reload.
             if (isFrameMetadataSourceName(ret.fileList?.[0]?.name ?? path)) {
               invalidateFrameMetadata();
             }
@@ -229,46 +229,6 @@ export default defineComponent({
           positiveButton: 'OK',
         });
         processing.value = false;
-      }
-    };
-    // Frame metadata is only meaningful for image-sequence datasets (single-camera or a
-    // multicam rig of image sequences); mirror the sibling sections and gate on media type
-    // so it never renders on video/large-image datasets, where an import can only fail.
-    const frameMetadataSupported = computed(
-      () => !!api.importFrameMetadataFile
-        && (props.mediaType === 'image-sequence' || isMulticamDataset.value),
-    );
-    const openFrameMetadataUpload = async () => {
-      if (!api.importFrameMetadataFile) return;
-      try {
-        const ret = await openFromDisk('frameMetadata');
-        if (ret.canceled || !ret.filePaths.length) return;
-        menuOpen.value = false;
-        processing.value = true;
-        const result = await api.importFrameMetadataFile(
-          props.datasetId,
-          ret.filePaths[0],
-          ret.fileList?.[0],
-        );
-        processing.value = false;
-        if (result === false) {
-          await prompt({
-            title: 'Frame Metadata Import Failed',
-            text: ['Could not import the frame metadata file.'],
-            positiveButton: 'OK',
-          });
-          return;
-        }
-        // The Frame Metadata panel reads through a session cache; drop it so the new
-        // sidecar shows up without reloading the viewer.
-        invalidateFrameMetadata();
-      } catch (error) {
-        processing.value = false;
-        prompt({
-          title: 'Frame Metadata Import Failed',
-          text: [getResponseError(error)],
-          positiveButton: 'OK',
-        });
       }
     };
     const openCalibrationUpload = async () => {
@@ -409,8 +369,6 @@ export default defineComponent({
     };
     return {
       openUpload,
-      frameMetadataSupported,
-      openFrameMetadataUpload,
       openCalibrationUpload,
       openRegistrationUpload,
       applyLastCalibration,
@@ -587,37 +545,6 @@ export default defineComponent({
             </div>
           </v-col>
         </v-container>
-        <template v-if="frameMetadataSupported">
-          <v-divider />
-          <v-card-title class="pt-3">
-            Import Frame Metadata
-          </v-card-title>
-          <v-card-text class="pb-0">
-            Attach a per-frame metadata file (CSV or delimited text) to this dataset.
-            The file can have any name; rows are matched to frames by image filename.
-            <span v-if="isMulticamDataset">
-              Frame metadata is stored with the dataset and shared across cameras.
-            </span>
-            <a
-              href="https://kitware.github.io/dive/Frame-Metadata/"
-              target="_blank"
-            >Frame Metadata Documentation</a>
-          </v-card-text>
-          <v-container>
-            <v-col>
-              <v-row>
-                <v-btn
-                  depressed
-                  block
-                  :disabled="!datasetId || processing"
-                  @click="openFrameMetadataUpload"
-                >
-                  Import
-                </v-btn>
-              </v-row>
-            </v-col>
-          </v-container>
-        </template>
         <template v-if="registrationSupported">
           <v-divider />
           <v-card-title class="pt-3">

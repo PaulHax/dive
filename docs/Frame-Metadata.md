@@ -12,10 +12,10 @@ imported as annotations, or included in annotation exports.
 
 There are two ways to declare a file as frame metadata:
 
-* **Import button (any filename).** In the annotation viewer, open the Import
-  menu and use its **Frame Metadata** section to pick a `.csv` or `.txt` file.
-  The file keeps its original name, is stored with the dataset, and appears in
-  the Dataset Info panel immediately.
+* **Upload slot (any filename).** When uploading an image sequence on the web, add
+  the file to the **Frame Metadata File(s)** slot in the upload dialog. The file
+  keeps its original name, is stored with the dataset, and appears in the Dataset
+  Info panel.
 * **Reserved filename.** Name the file `frame-metadata.csv` or
   `frame-metadata.txt` (the snake_case names `frame_metadata.csv` and
   `frame_metadata.txt` are also accepted) and include it with the imagery. The
@@ -23,11 +23,11 @@ There are two ways to declare a file as frame metadata:
   dataset uploads, zip archives, assetstore/S3 imports, and desktop folder
   imports.
 
-Use the reserved filename for automated or bulk ingestion and for datasets that
-will be exported and re-imported elsewhere — the filename is the only
-declaration that travels with the file. Files declared through the Import
-button are recorded with the dataset itself, so that declaration does not
-survive a dataset export.
+Use the reserved filename for automated or bulk ingestion, for multicamera
+datasets, and for datasets that will be exported and re-imported elsewhere — the
+filename is the only declaration that travels with the file. A file declared
+through the upload slot is recorded with the dataset itself, so that declaration
+does not survive a dataset export.
 
 Other CSV or text files are handled by the normal annotation import flow.
 
@@ -57,8 +57,8 @@ not infer units or data types from the column names.
 
 ## Placement
 
-Files added through the Import button are stored with the dataset
-automatically; no placement is needed.
+Files added through the upload slot are stored with the dataset automatically;
+no placement is needed.
 
 For reserved-name sidecars in a single-camera image sequence, place the file in
 the dataset folder beside the images.
@@ -70,14 +70,13 @@ For a multicamera image sequence, use either:
 
 A shared multicamera file can contain one filename column per camera, such as
 `port_image` and `starboard_image`. Each active camera displays the rows that
-match that camera's images. Files added through the Import button are shared
-across cameras the same way.
+match that camera's images.
 
 When both shared and camera-specific sidecars are present, their columns are
 combined. For a column both files define, the camera-specific value is used
 where available; columns only the shared file defines are filled from the
-shared file. In that per-column order, an imported file is used ahead of other
-shared sidecars.
+shared file. In that per-column order, a slot-declared file is used ahead of
+other shared sidecars.
 
 ## Limits
 
