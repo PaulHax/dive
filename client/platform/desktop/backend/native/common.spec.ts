@@ -1625,6 +1625,33 @@ describe('frame metadata read path (source text loading)', () => {
   });
 });
 
+describe('frame metadata pipeline path (opt-in pipeline injection)', () => {
+  it('returns the top-ranked sidecar path', async () => {
+    const path = await common.getFrameMetadataPipelinePath(settings, 'projectidFrameMetadata');
+    expect(path).not.toBeNull();
+    expect(npath.basename(path as string)).toBe('frame-metadata.txt');
+  });
+
+  it('prefers an explicitly declared sidecar over a convention-named one', async () => {
+    const path = await common.getFrameMetadataPipelinePath(
+      settings,
+      'projectidFrameMetadataDeclared',
+    );
+    // A pipeline consumes one file: the declared sidecar outranks the reserved-name one.
+    expect(npath.basename(path as string)).toBe('nav_2024.csv');
+  });
+
+  it('returns null when the dataset has no sidecar', async () => {
+    await expect(common.getFrameMetadataPipelinePath(settings, 'projectidFrameMetadataNoSource'))
+      .resolves.toBeNull();
+  });
+
+  it('returns null for a non-image-sequence dataset', async () => {
+    await expect(common.getFrameMetadataPipelinePath(settings, 'projectid1VideoGood'))
+      .resolves.toBeNull();
+  });
+});
+
 describe('explicit frame metadata import', () => {
   it('copies the file into auxiliary, records it in meta.json, and discovery lists it first', async () => {
     const source = '/home/user/data/frameMetadataImportSource/nav_2024.csv';

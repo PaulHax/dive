@@ -520,6 +520,24 @@ def _load_multicam_frame_metadata_sources(
     return {'cameras': cameras}
 
 
+def resolve_pipeline_frame_metadata_item_id(
+    folder: types.GirderModel,
+    user: types.GirderUserModel,
+) -> Optional[str]:
+    """The dataset's top-ranked frame-metadata sidecar item id, handed to opt-in pipelines.
+
+    Frame metadata is deliberately many (per-column / per-camera sources that merge for
+    display), but a pipeline consumes a single file: the first source in precedence order
+    (explicitly declared beats reserved-name; multicam takes the first camera that has one).
+    Returns ``None`` when the dataset has no frame-metadata sidecar.
+    """
+    cameras = load_frame_metadata_sources(folder, user).get('cameras', {})
+    for sources in cameras.values():
+        if sources:
+            return sources[0]['itemId']
+    return None
+
+
 class MetadataMutableUpdateArgs(models.MetadataMutable):
     """Update schema for mutable metadata fields"""
 

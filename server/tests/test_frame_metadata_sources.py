@@ -340,6 +340,75 @@ def test_sources_multicam_missing_folder_id_raises_400(get_clone_root, folder_cl
     assert exc_info.value.code == 400
 
 
+@patch('dive_server.crud_dataset.Folder')
+@patch('dive_server.crud_dataset.crud.getCloneRoot')
+def test_resolve_pipeline_frame_metadata_single_camera_top_ranked(get_clone_root, folder_cls):
+    dataset = _dataset_folder()
+    user = {'_id': 'user-id'}
+    get_clone_root.return_value = dataset
+    marked = {
+        '_id': 'nav_2024.csv-id',
+        'name': 'nav_2024.csv',
+        'meta': {constants.FrameMetadataMarker: True, constants.ProcessedMarker: True},
+    }
+    folder_cls.return_value.childItems.return_value = [
+        _source_item('image_0001.jpg'),
+        _source_item('frame-metadata.csv'),
+        marked,
+    ]
+
+    # A pipeline consumes one file: the top-ranked source (declared beats reserved-name).
+    assert crud_dataset.resolve_pipeline_frame_metadata_item_id(dataset, user) == 'nav_2024.csv-id'
+
+
+@patch('dive_server.crud_dataset.Folder')
+@patch('dive_server.crud_dataset.crud.getCloneRoot')
+def test_resolve_pipeline_frame_metadata_item_id_none_without_sidecar(get_clone_root, folder_cls):
+    dataset = _dataset_folder()
+    user = {'_id': 'user-id'}
+    get_clone_root.return_value = dataset
+    folder_cls.return_value.childItems.return_value = [_source_item('image_0001.jpg')]
+
+    # No sidecar means nothing is injected; opt-in pipes simply run without the override.
+    assert crud_dataset.resolve_pipeline_frame_metadata_item_id(dataset, user) is None
+
+
+@patch('dive_server.crud_dataset.Folder')
+@patch('dive_server.crud_dataset.crud.getCloneRoot')
+def test_resolve_pipeline_frame_metadata_item_id_multicam_first_camera(get_clone_root, folder_cls):
+    parent = _multicam_parent_folder()
+    port = _camera_folder('port-id', 'port')
+    starboard = _camera_folder('starboard-id', 'starboard')
+    user = {'_id': 'user-id'}
+    folder_model = folder_cls.return_value
+    _wire_multicam_folders(folder_model, {'port-id': port, 'starboard-id': starboard})
+    _child_items_by_folder(
+        folder_model,
+        {
+            'port-id': [_source_item('frame_metadata.csv')],
+            'port-root-id': [],
+            'starboard-id': [_source_item('frame-metadata.txt')],
+            'starboard-root-id': [],
+            'parent-id': [],
+            'parent-root-id': [],
+        },
+    )
+    _wire_clone_roots(
+        get_clone_root,
+        {
+            'parent-id': _root_folder('parent-root-id'),
+            'port-id': _root_folder('port-root-id'),
+            'starboard-id': _root_folder('starboard-root-id'),
+        },
+    )
+
+    # The first camera in display order (port) that has a sidecar provides the pipeline's file.
+    assert (
+        crud_dataset.resolve_pipeline_frame_metadata_item_id(parent, user)
+        == 'frame_metadata.csv-id'
+    )
+
+
 @patch('girder.api.rest.Resource.route')
 def test_dataset_resource_registers_frame_metadata_sources_route(route):
     with patch('dive_server.views_dataset.Folder'):

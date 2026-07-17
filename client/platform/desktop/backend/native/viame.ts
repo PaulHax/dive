@@ -317,6 +317,16 @@ async function runPipeline(
     throw new Error('Attempting to run a multicam pipeline on non multicam data');
   }
 
+  // Hand the dataset's frame metadata file to pipelines that opt in via a
+  // `# Metadata File: <block>:<key>` header (e.g. sea-lion stabilizer:flight_log).
+  const metadataFileKey = runPipelineArgs.pipeline.metadata?.metadataFileKey;
+  if (metadataFileKey) {
+    const frameMetadataPath = await common.getFrameMetadataPipelinePath(settings, datasetId);
+    if (frameMetadataPath) {
+      command.push(`-s ${metadataFileKey}="${frameMetadataPath}"`);
+    }
+  }
+
   // Add any custom pipeline parameters
   const kwiverParams = runPipelineArgs.pipelineParams?.kwiverParams;
   if (kwiverParams) {

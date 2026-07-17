@@ -78,6 +78,25 @@ where available; columns only the shared file defines are filled from the
 shared file. In that per-column order, a slot-declared file is used ahead of
 other shared sidecars.
 
+## Passing frame metadata to a pipeline
+
+A pipeline can receive the dataset's frame metadata file at run time (for example
+a flight log a stabilizer reads). A pipe opts in by declaring a KWIVER config key
+in its header:
+
+```
+# Metadata File: stabilizer:flight_log
+```
+
+When such a pipe runs on a dataset that has a frame metadata sidecar, DIVE passes
+that file to KWIVER as `-s stabilizer:flight_log=<path>`. Pipes without the header
+receive nothing and run unchanged.
+
+The dataset's frame metadata file is the same sidecar shown in the Dataset Info
+panel — there is no separate upload. When a dataset has more than one sidecar,
+the highest-precedence source is passed (a slot-declared file ahead of a
+reserved-name one; for multicamera datasets, the first camera that has one).
+
 ## Limits
 
 Frame metadata sidecars are supported for image-sequence datasets. Frame

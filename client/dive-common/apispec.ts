@@ -54,6 +54,13 @@ interface PipeMetadata {
   outputType?: string;
   diveParams?: DiveParam[];
   requiresCalibration?: boolean;
+  /**
+   * KWIVER config key (e.g. "stabilizer:flight_log") that the dataset's frame
+   * metadata file should be bound to at run time. Parsed from a pipe header
+   * `# Metadata File: <block>:<key>`. When unset, the pipe consumes no frame
+   * metadata and none is injected.
+   */
+  metadataFileKey?: string;
 }
 
 interface PipelineRuntimeParams {

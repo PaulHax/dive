@@ -334,6 +334,14 @@ def run_pipeline(
                 code=404,
             )
 
+    # Hand the dataset's frame metadata file to pipelines that opt in via a
+    # `# Metadata File: <block>:<key>` header. Applies to single and multicam.
+    pipe_metadata = pipeline.get("metadata")
+    metadata_file_key = pipe_metadata.get("metadataFileKey") if pipe_metadata else None
+    metadata_file_item_id: Optional[str] = None
+    if metadata_file_key:
+        metadata_file_item_id = crud_dataset.resolve_pipeline_frame_metadata_item_id(folder, user)
+
     params: types.MulticamPipelineJob = {
         "pipeline": pipeline,
         "input_folder": folder_id_str,
@@ -352,6 +360,9 @@ def run_pipeline(
         params['multicam_requires_input'] = multicam_requires_input
         if calibration_item_id:
             params['calibration_item_id'] = calibration_item_id
+    if metadata_file_key and metadata_file_item_id:
+        params['metadata_file_key'] = metadata_file_key
+        params['metadata_file_item_id'] = metadata_file_item_id
     newjob = tasks.run_pipeline.apply_async(
         queue=_get_queue_name(user, "pipelines"),
         kwargs=dict(

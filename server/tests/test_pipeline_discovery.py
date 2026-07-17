@@ -94,3 +94,31 @@ def test_extract_pipe_metadata_requires_calibration(tmp_path: Path):
     assert metadata['description'] == 'stereo measurement'
     assert metadata['inputType'] == 'TRACK'
     assert metadata['outputType'] == 'TRACK'
+
+
+def test_extract_pipe_metadata_parses_metadata_file_key(tmp_path: Path):
+    pipe = tmp_path / 'detector_stabilize.pipe'
+    pipe.write_text(
+        '\n'.join(
+            [
+                '# Description: stabilized detector',
+                '# Metadata File: stabilizer:flight_log',
+                '# Input: TRACK',
+            ]
+        )
+    )
+
+    metadata = extract_pipe_metadata(pipe)
+
+    # The opt-in header binds the dataset's frame metadata file to this KWIVER key at run time.
+    assert metadata['metadataFileKey'] == 'stabilizer:flight_log'
+    assert metadata['description'] == 'stabilized detector'
+    assert metadata['inputType'] == 'TRACK'
+
+
+def test_extract_pipe_metadata_absent_metadata_file_key(tmp_path: Path):
+    pipe = tmp_path / 'detector_plain.pipe'
+    pipe.write_text('# Description: plain detector\n# Input: TRACK\n')
+
+    # A pipe that does not opt in leaves the key unset, so no file is injected.
+    assert 'metadataFileKey' not in extract_pipe_metadata(pipe)

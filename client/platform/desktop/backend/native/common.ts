@@ -146,7 +146,7 @@ async function extractPipeMetadata(filePath: string): Promise<PipeMetadata> {
       }
 
       if (inDescription) {
-        if (/^#\s*$/.test(line) || /^#\s*=/.test(line) || /^#\s*(Input|Output|Requires\s+Calibration):/i.test(line) || !line.startsWith('#')) {
+        if (/^#\s*$/.test(line) || /^#\s*=/.test(line) || /^#\s*(Input|Output|Requires\s+Calibration|Metadata\s+File):/i.test(line) || !line.startsWith('#')) {
           inDescription = false;
         } else {
           fullDescription += ` ${line.replace(/^#\s*/, '').trim()}`;
@@ -166,6 +166,16 @@ async function extractPipeMetadata(filePath: string): Promise<PipeMetadata> {
       if (calibrationMatch) {
         const value = calibrationMatch[1].trim().toLowerCase();
         metadata.requiresCalibration = ['true', 'yes', '1'].includes(value);
+      }
+
+      // `# Metadata File: <block>:<key>` opts a pipe in to receiving the
+      // dataset's frame metadata file as a `-s <block>:<key>=<path>` override.
+      const metadataFileMatch = line.match(/^#\s*Metadata\s+File:\s*(.+)/i);
+      if (metadataFileMatch) {
+        const value = metadataFileMatch[1].trim();
+        if (value) {
+          metadata.metadataFileKey = value;
+        }
       }
     });
     metadata.description = fullDescription.trim() || undefined;
@@ -704,6 +714,73 @@ async function loadFrameMetadata(
       singleCam: texts.map(([name, text]) => ({ name, text })),
     },
   };
+}
+
+// Ordered frame-metadata sidecar candidates for the whole project (declared first, then
+// reserved-name; multicam concatenates cameras in display order). Mirrors loadFrameMetadata's
+// gathering but resolves paths only -- no text read -- for callers that need a file path.
+async function orderedFrameMetadataCandidates(
+  projectBasePath: string,
+  projectMetaData: JsonMeta,
+): Promise<FrameMetadataCandidate[]> {
+  const declaredCandidates = await declaredFrameMetadataCandidates(
+    projectBasePath,
+    projectMetaData,
+  );
+  if (projectMetaData.type === 'image-sequence') {
+    return declaredCandidates.concat(await gatherFrameMetadataCandidates(
+      frameMetadataSourceDirectories(projectMetaData),
+    ));
+  }
+  if (projectMetaData.type !== MultiType) {
+    return [];
+  }
+  const { multiCam } = projectMetaData;
+  if (!multiCam) {
+    return [];
+  }
+  const cameraEntries = orderedMultiCamCameraNames({
+    cameras: multiCam.cameras,
+    defaultDisplay: multiCam.defaultDisplay,
+  }).map((cameraName) => multiCam.cameras[cameraName]);
+  const rootDirectory = projectMetaData.originalBasePath
+    || commonParentDirectory(cameraEntries.flatMap(
+      (camera) => frameMetadataSourceDirectories(camera),
+    ));
+  const resolvedRoot = rootDirectory ? npath.resolve(rootDirectory) : null;
+  const rootCandidates = await frameMetadataCandidateDescriptors(rootDirectory);
+  const perCamera = await Promise.all(cameraEntries.map(async (cameraMeta) => {
+    if (cameraMeta.type !== 'image-sequence') {
+      return [];
+    }
+    const cameraDirectories = frameMetadataSourceDirectories(cameraMeta);
+    const cameraCandidates = await gatherFrameMetadataCandidates(cameraDirectories);
+    const sharedCandidates = declaredCandidates.concat(
+      resolvedRoot !== null && !cameraDirectories.includes(resolvedRoot) ? rootCandidates : [],
+    );
+    return cameraCandidates.concat(sharedCandidates);
+  }));
+  return ([] as FrameMetadataCandidate[]).concat(...perCamera);
+}
+
+/**
+ * The dataset's top-ranked frame-metadata sidecar path, handed to opt-in pipelines.
+ * Frame metadata is deliberately many (per-column / per-camera sources that merge for
+ * display), but a pipeline consumes a single file: the first candidate in precedence order
+ * (declared beats reserved-name). Returns null when the dataset has no sidecar.
+ */
+async function getFrameMetadataPipelinePath(
+  settings: Settings,
+  datasetId: string,
+): Promise<string | null> {
+  const parentId = parentDatasetId(datasetId);
+  const projectDirData = await getValidatedProjectDir(settings, parentId);
+  const projectMetaData = await loadJsonMetadata(projectDirData.metaFileAbsPath);
+  const candidates = await orderedFrameMetadataCandidates(
+    projectDirData.basePath,
+    projectMetaData,
+  );
+  return candidates.length ? candidates[0].absolutePath : null;
 }
 
 /**
@@ -2066,6 +2143,7 @@ export {
   loadAnnotationFile,
   loadDetections,
   loadFrameMetadata,
+  getFrameMetadataPipelinePath,
   frameMetadataSourceDirectories,
   frameMetadataCandidateDescriptors,
   importFrameMetadataFile,
