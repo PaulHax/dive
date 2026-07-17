@@ -121,6 +121,11 @@ CalibrationConversionErrorMarker = "calibrationConversionError"
 # affordances so arbitrary-named sidecars are equivalent to the reserved
 # frame-metadata.csv naming convention for discovery and import classification.
 FrameMetadataMarker = "frameMetadata"
+# Girder folder meta: cross-backend association of record for media-attached auxiliary
+# files (frame metadata today), keyed by camera. The item marker above locates the bytes
+# on this backend; this map is the backend-neutral record that travels clone and mirrors
+# desktop's meta.json. See dive-common DatasetMetaMutable.mediaFiles.
+MediaFilesMarker = "mediaFiles"
 # Girder item meta: original stereoscopic calibration upload (npz, yml, etc.)
 CalibrationFileMarker = "calibrationFile"
 # Girder item meta: JSON camera-rig used for calibration display

@@ -242,6 +242,19 @@ class PairHomography(BaseModel):
 CameraTransformType = Literal['translation', 'rigid', 'similarity', 'affine', 'homography']
 
 
+class MediaFileAssociation(BaseModel):
+    """One media-attached auxiliary file recorded on the dataset's mediaFiles map.
+
+    Backend-neutral: it carries the role and the original filename, not the bytes. The web
+    backend resolves bytes via the item marker, desktop via the project-dir path. Mirrors the
+    client MediaFileAssociation. ``role`` is a Literal today (only frame metadata) and grows as
+    pipeline metadata / calibration migrate onto this structure.
+    """
+
+    role: Literal['frameMetadata']
+    name: str
+
+
 class MetadataMutable(BaseModel):
     version = (
         constants.JsonMetaCurrentVersion
@@ -269,6 +282,12 @@ class MetadataMutable(BaseModel):
     # DIVE; preserved verbatim so refined calibrations can be traced back to the
     # model version they were made against.
     cameraRegistrationSource: Optional[Dict[str, Any]]
+    # Cross-backend association of record for media-attached auxiliary files (frame metadata
+    # today; pipeline metadata / calibration later), keyed by camera name or the single-camera
+    # key. The per-backend byte locator (web item marker / desktop project-dir path) resolves
+    # the file; this map is what travels clone and round-trips. Mirrors client
+    # DatasetMetaMutable.mediaFiles.
+    mediaFiles: Optional[Dict[str, List[MediaFileAssociation]]]
     fps: Optional[float]
 
     @staticmethod

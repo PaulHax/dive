@@ -224,6 +224,41 @@ def test_declared_frame_metadata_items_are_marked_and_kept(
     file_cls.return_value.download.assert_not_called()
 
 
+@patch('dive_server.crud_rpc.crud_annotation.save_annotations')
+@patch('dive_server.crud_rpc.crud.get_or_create_auxiliary_folder')
+@patch('dive_server.crud_rpc.File')
+@patch('dive_server.crud_rpc.Item')
+@patch('dive_server.crud_rpc.Folder')
+def test_declared_single_camera_items_recorded_in_media_files(
+    folder_cls, item_cls, file_cls, get_auxiliary_folder, save_annotations
+):
+    # Declaration marks the item (the web byte-locator) AND records the association in the
+    # cross-backend mediaFiles map, keyed by the single-camera key. Re-declaring a name replaces
+    # it in place (no duplicate) while other entries under the key are preserved.
+    folder = {
+        '_id': 'ds',
+        'meta': {
+            'type': constants.ImageSequenceType,
+            'fps': 5,
+            constants.MediaFilesMarker: {
+                'singleCam': [{'role': 'frameMetadata', 'name': 'nav_2024.csv'}],
+            },
+        },
+    }
+    item_csv = {'_id': 'a', 'folderId': 'ds', 'name': 'nav_2024.csv', 'meta': {}}
+    item_txt = {'_id': 'b', 'folderId': 'ds', 'name': 'nav_2024.txt', 'meta': {}}
+    _wire_declared_lookup(folder_cls, item_cls, [item_csv, item_txt])
+
+    process_items(folder, {'_id': 'user-id'}, frameMetadataItemIds=['a', 'b'])
+
+    assert folder['meta'][constants.MediaFilesMarker] == {
+        'singleCam': [
+            {'role': 'frameMetadata', 'name': 'nav_2024.csv'},
+            {'role': 'frameMetadata', 'name': 'nav_2024.txt'},
+        ],
+    }
+
+
 @patch('dive_server.crud_rpc.Item')
 @patch('dive_server.crud_rpc.Folder')
 def test_declared_item_missing_from_folder_raises(folder_cls, item_cls):
@@ -297,6 +332,9 @@ def test_declared_items_allowed_for_multicam_parent(folder_cls, item_cls):
 
     assert len(warnings) == 1
     assert item['meta'][constants.FrameMetadataMarker] is True
+    # Multicam keeps to the marker for per-camera resolution; no mediaFiles record is written
+    # (its per-camera keying is left to the reserved-name convention for now).
+    assert constants.MediaFilesMarker not in folder['meta']
     assert item['meta'][constants.ProcessedMarker] is True
 
 

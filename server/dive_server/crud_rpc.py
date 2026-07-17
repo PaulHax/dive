@@ -701,7 +701,44 @@ def _declare_frame_metadata_items(
             item,
             {constants.FrameMetadataMarker: True, constants.ProcessedMarker: True},
         )
+    # Single-camera image sequences also record the association in the cross-backend mediaFiles
+    # map (marker = byte locator, mediaFiles = the record that travels clone and round-trips).
+    # Multicam declares through this path too but its per-camera keying is resolved by the
+    # marker; leave its mediaFiles record to the reserved-name convention for now.
+    if items and dataset_type == constants.ImageSequenceType:
+        _record_frame_metadata_media_files(folder, [item['name'] for item in items])
     return [_frame_metadata_kept_warning(item['name']) for item in items]
+
+
+def _record_frame_metadata_media_files(
+    folder: types.GirderModel,
+    names: List[str],
+) -> None:
+    """Record declared single-camera frame-metadata sidecars in the folder's mediaFiles map.
+
+    Keyed by the single-camera key. Entries dedupe by name so a re-import replaces in place,
+    and other roles/cameras already in the map are preserved. The item marker set alongside is
+    the web byte-locator; this map is the backend-neutral association of record.
+    """
+    key = crud_dataset.SINGLE_CAMERA_FRAME_METADATA_KEY
+    media_files = dict(fromMeta(folder, constants.MediaFilesMarker, {}))
+    redeclared = set(names)
+    kept = [
+        entry
+        for entry in media_files.get(key, [])
+        if not (
+            isinstance(entry, dict)
+            and entry.get('role') == frame_metadata.FRAME_METADATA_ROLE
+            and entry.get('name') in redeclared
+        )
+    ]
+    kept.extend(
+        {'role': frame_metadata.FRAME_METADATA_ROLE, 'name': name}
+        for name in dict.fromkeys(names)
+    )
+    media_files[key] = kept
+    folder['meta'][constants.MediaFilesMarker] = media_files
+    Folder().save(folder)
 
 
 def process_items(

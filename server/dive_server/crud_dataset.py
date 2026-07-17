@@ -418,30 +418,40 @@ SINGLE_CAMERA_FRAME_METADATA_KEY = 'singleCam'
 def _frame_metadata_source_items(
     folder: types.GirderModel,
 ) -> List[Dict[str, str]]:
-    """List a folder's declared sidecar items as {itemId, name}, marker items first (no download).
+    """List a folder's declared sidecar items as {itemId, name}, declared items first (no download).
 
-    A sidecar is declared either by the reserved basename or by the explicit-import item
-    marker. Explicitly imported (marker-declared) sidecars are listed ahead of reserved-name
-    ones so the client's column-level first-wins resolver honors an imported file over the
+    A sidecar is declared by the reserved basename, the explicit-import item marker, or an
+    entry in the folder's mediaFiles association map (the cross-backend record). Explicitly
+    declared (marker- or mediaFiles-declared) sidecars are listed ahead of reserved-name ones
+    so the client's column-level first-wins resolver honors a declared file over the
     convention-named sidecars it shares a folder with -- matching desktop's declared-first
     order and the Frame-Metadata docs. Ties within a tier are name-sorted. Only identity is
     resolved here: the server classifies sidecars by declaration and never reads, parses, or
     joins them. The client downloads and parses the bytes at read time.
     """
-    items = [
-        item
-        for item in Folder().childItems(folder)
-        if frame_metadata.is_declared_frame_metadata(item)
-    ]
+    media_file_names = frame_metadata.media_file_frame_metadata_names(
+        fromMeta(folder, constants.MediaFilesMarker, {})
+    )
+
+    def is_declared(item: types.GirderModel) -> bool:
+        # mediaFiles is the association of record; the marker is the byte locator. Reserved
+        # names are declared by convention. Any of the three declares the sidecar.
+        return (
+            frame_metadata.is_declared_frame_metadata(item)
+            or item['name'] in media_file_names
+        )
+
+    def declared_first(item: types.GirderModel):
+        explicit = (
+            asbool(fromMeta(item, constants.FrameMetadataMarker))
+            or item['name'] in media_file_names
+        )
+        return (not explicit, str(item['name']).lower())
+
+    items = [item for item in Folder().childItems(folder) if is_declared(item)]
     return [
         {'itemId': str(item['_id']), 'name': item['name']}
-        for item in sorted(
-            items,
-            key=lambda entry: (
-                not asbool(fromMeta(entry, constants.FrameMetadataMarker)),
-                str(entry['name']).lower(),
-            ),
-        )
+        for item in sorted(items, key=declared_first)
     ]
 
 

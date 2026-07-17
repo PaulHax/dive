@@ -21,6 +21,7 @@ import {
   FrameImage, DatasetMetaMutable, TrainingConfig, TrainingConfigs, SaveAttributeArgs,
   MultiCamMedia,
   DatasetMetaMutableKeys,
+  MediaFileAssociation,
   AnnotationSchema,
   SaveAttributeTrackFilterArgs,
   Pipe,
@@ -745,6 +746,18 @@ async function importFrameMetadataFile(
     declared.push(relativePath);
   }
   existing.frameMetadataFiles = declared;
+  // Record the association in the cross-backend mediaFiles map. The relative path above is the
+  // desktop byte-locator; this map is the shared record (mirrors the web item marker). Keyed by
+  // the single-camera key; dedupe by name so a re-import replaces in place. Multicam keeps to
+  // the reserved-name convention, matching the web declaration path.
+  if (existing.type === 'image-sequence') {
+    const mediaFiles: Record<string, MediaFileAssociation[]> = existing.mediaFiles ?? {};
+    const singleCam = (mediaFiles.singleCam ?? [])
+      .filter((entry) => !(entry.role === 'frameMetadata' && entry.name === destName));
+    singleCam.push({ role: 'frameMetadata', name: destName });
+    mediaFiles.singleCam = singleCam;
+    existing.mediaFiles = mediaFiles;
+  }
   await _saveAsJson(projectDirData.metaFileAbsPath, existing);
   await release();
   return true;
@@ -1024,6 +1037,9 @@ async function saveMetadata(settings: Settings, datasetId: string, args: Dataset
   }
   if (args.datasetInfo) {
     existing.datasetInfo = args.datasetInfo;
+  }
+  if (args.mediaFiles) {
+    existing.mediaFiles = args.mediaFiles;
   }
 
   // The camera registration (transforms + the points behind them) is

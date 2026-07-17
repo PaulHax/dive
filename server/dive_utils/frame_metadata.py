@@ -19,6 +19,11 @@ FRAME_METADATA_SOURCE_NAMES = {
 }
 PATH_SPLIT_RE = re.compile(r'[/\\]')
 
+# Role value recorded in the mediaFiles association map. Mirrors the client's
+# MediaFileAssociation.role literal. Distinct from the FrameMetadataMarker item-marker key
+# even though they share a string value: this is a role, that is a Girder meta key.
+FRAME_METADATA_ROLE = 'frameMetadata'
+
 
 def is_frame_metadata_source_name(name: str) -> bool:
     """A frame metadata sidecar is declared by basename."""
@@ -35,3 +40,25 @@ def is_declared_frame_metadata(item: dict) -> bool:
     return is_frame_metadata_source_name(item['name']) or asbool(
         fromMeta(item, constants.FrameMetadataMarker)
     )
+
+
+def media_file_frame_metadata_names(media_files: dict) -> set:
+    """Original filenames recorded as frame-metadata sidecars in a folder's mediaFiles map.
+
+    ``mediaFiles`` is the cross-backend association of record (role + name), keyed by camera.
+    The web byte-locator is the item marker; this set lets the read-time resolver honor a
+    recorded sidecar even where the marker did not travel (e.g. a metadata round-trip). The
+    map is untrusted input, so malformed entries are skipped rather than trusted.
+    """
+    names: set = set()
+    for entries in (media_files or {}).values():
+        if not isinstance(entries, list):
+            continue
+        for entry in entries:
+            if (
+                isinstance(entry, dict)
+                and entry.get('role') == FRAME_METADATA_ROLE
+                and entry.get('name')
+            ):
+                names.add(entry['name'])
+    return names

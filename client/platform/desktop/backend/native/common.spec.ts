@@ -1635,6 +1635,9 @@ describe('explicit frame metadata import', () => {
     expect(fs.existsSync(npath.join(projectDir, 'auxiliary', 'nav_2024.csv'))).toBe(true);
     const meta = JSON.parse(await fs.readFile(npath.join(projectDir, 'meta.json'), 'utf-8'));
     expect(meta.frameMetadataFiles).toEqual([npath.join('auxiliary', 'nav_2024.csv')]);
+    // The on-disk path above is the desktop byte-locator; mediaFiles is the cross-backend
+    // association of record (mirrors the web item marker), keyed by the single-camera key.
+    expect(meta.mediaFiles).toEqual({ singleCam: [{ role: 'frameMetadata', name: 'nav_2024.csv' }] });
 
     const data = await common.loadFrameMetadata(settings, 'projectidFrameMetadata');
     expect(data.cameras.singleCam.map((source_) => source_.name))
@@ -1645,6 +1648,7 @@ describe('explicit frame metadata import', () => {
       .resolves.toBe(true);
     const meta2 = JSON.parse(await fs.readFile(npath.join(projectDir, 'meta.json'), 'utf-8'));
     expect(meta2.frameMetadataFiles).toEqual([npath.join('auxiliary', 'nav_2024.csv')]);
+    expect(meta2.mediaFiles).toEqual({ singleCam: [{ role: 'frameMetadata', name: 'nav_2024.csv' }] });
   });
 
   it('rejects unsupported extensions', async () => {

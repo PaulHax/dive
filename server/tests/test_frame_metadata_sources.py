@@ -5,7 +5,7 @@ import pytest
 
 from dive_server import crud_dataset
 from dive_server.views_dataset import DatasetResource
-from dive_utils import constants
+from dive_utils import constants, frame_metadata
 
 
 def _dataset_folder():
@@ -199,6 +199,39 @@ def test_sources_include_marker_declared_items(get_clone_root, folder_cls):
     }
 
 
+@patch('dive_server.crud_dataset.Folder')
+@patch('dive_server.crud_dataset.crud.getCloneRoot')
+def test_sources_include_media_files_declared_items(get_clone_root, folder_cls):
+    dataset = _dataset_folder()
+    # mediaFiles is the cross-backend association of record. It declares the sidecar even on an
+    # item that carries no marker (e.g. after a metadata round-trip that dropped the item
+    # marker), which the marker-only path could not resolve.
+    dataset['meta'][constants.MediaFilesMarker] = {
+        'singleCam': [{'role': 'frameMetadata', 'name': 'nav_2024.csv'}],
+    }
+    user = {'_id': 'user-id'}
+    get_clone_root.return_value = dataset
+    recorded = {'_id': 'nav_2024.csv-id', 'name': 'nav_2024.csv', 'meta': {}}
+    folder_cls.return_value.childItems.return_value = [
+        _source_item('image_0001.jpg'),
+        recorded,
+        _source_item('frame-metadata.csv'),
+    ]
+
+    result = crud_dataset.load_frame_metadata_sources(dataset, user)
+
+    # The mediaFiles-declared sidecar is listed ahead of reserved-name ones, same tier as a
+    # marker-declared file, so it wins column conflicts in the client's first-wins resolver.
+    assert result == {
+        'cameras': {
+            'singleCam': [
+                _descriptor('nav_2024.csv'),
+                _descriptor('frame-metadata.csv'),
+            ],
+        },
+    }
+
+
 @pytest.mark.parametrize('dataset_type', [constants.VideoType, constants.LargeImageType])
 @patch('dive_server.crud_dataset.Folder')
 @patch('dive_server.crud_dataset.crud.getCloneRoot')
@@ -316,6 +349,29 @@ def test_dataset_resource_registers_frame_metadata_sources_route(route):
         call.args == ("GET", (":id", "frame_metadata_sources"), resource.get_frame_metadata_sources)
         for call in route.call_args_list
     )
+
+
+def test_media_file_frame_metadata_names_collects_across_cameras_ignoring_malformed():
+    media_files = {
+        'singleCam': [
+            {'role': 'frameMetadata', 'name': 'nav_2024.csv'},
+            {'role': 'pipelineMetadata', 'name': 'flight.csv'},  # a different role is not ours
+            {'role': 'frameMetadata'},  # missing name
+            'not-a-dict',  # malformed entry
+        ],
+        'port': [{'role': 'frameMetadata', 'name': 'port_nav.csv'}],
+        'broken': 'not-a-list',  # malformed camera value
+    }
+
+    assert frame_metadata.media_file_frame_metadata_names(media_files) == {
+        'nav_2024.csv',
+        'port_nav.csv',
+    }
+
+
+def test_media_file_frame_metadata_names_empty_for_missing_map():
+    assert frame_metadata.media_file_frame_metadata_names({}) == set()
+    assert frame_metadata.media_file_frame_metadata_names(None) == set()
 
 
 @patch('dive_server.views_dataset.crud_dataset.load_frame_metadata_sources')

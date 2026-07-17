@@ -214,6 +214,18 @@ interface MediaImportResponse {
 type DatasetInfoFields = Record<string, unknown>;
 
 /**
+ * One media-attached auxiliary file recorded on the dataset. Backend-neutral: it carries the
+ * role and original filename, not the bytes. The web backend resolves bytes via the item
+ * marker, desktop via the project-dir path. `role` is extensible as pipeline metadata /
+ * calibration migrate onto this structure.
+ */
+interface MediaFileAssociation {
+  role: 'frameMetadata';
+  /** Original filename, human-facing. */
+  name: string;
+}
+
+/**
  * The parts of metadata a user should be able to modify.
  */
 interface DatasetMetaMutable {
@@ -230,9 +242,15 @@ interface DatasetMetaMutable {
   cameraTransformTypes?: CameraTransformTypes;
   /** Producer provenance of the camera registration (see RegistrationSource). */
   cameraRegistrationSource?: RegistrationSource | null;
+  /**
+   * Cross-backend association of record for media-attached auxiliary files, keyed by camera
+   * name (or the single-camera key). The per-backend byte locator (web item marker / desktop
+   * project-dir path) resolves the file; this map travels clone and round-trips.
+   */
+  mediaFiles?: Record<string, MediaFileAssociation[]>;
   error?: string;
 }
-const DatasetMetaMutableKeys = ['attributes', 'confidenceFilters', 'timeFilters', 'imageEnhancements', 'customTypeStyling', 'customGroupStyling', 'attributeTrackFilters', 'datasetInfo', 'cameraHomographies', 'cameraCorrespondences', 'cameraTransformTypes', 'cameraRegistrationSource'];
+const DatasetMetaMutableKeys = ['attributes', 'confidenceFilters', 'timeFilters', 'imageEnhancements', 'customTypeStyling', 'customGroupStyling', 'attributeTrackFilters', 'datasetInfo', 'cameraHomographies', 'cameraCorrespondences', 'cameraTransformTypes', 'cameraRegistrationSource', 'mediaFiles'];
 
 interface DatasetMeta extends DatasetMetaMutable {
   id: Readonly<string>;
@@ -579,6 +597,7 @@ export {
   Api,
   DatasetMeta,
   DatasetInfoFields,
+  MediaFileAssociation,
   DatasetMetaMutable,
   DatasetMetaMutableKeys,
   DatasetType,
