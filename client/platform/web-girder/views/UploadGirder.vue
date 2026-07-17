@@ -7,7 +7,7 @@ import {
   fileSuffixRegex,
 } from 'platform/web-girder/constants';
 
-import { makeViameFolder, postProcess } from 'platform/web-girder/api';
+import { importFrameMetadataFile, makeViameFolder, postProcess } from 'platform/web-girder/api';
 import { GirderUploadManager } from 'platform/web-girder/utils';
 
 export default Vue.extend({
@@ -113,6 +113,7 @@ export default Vue.extend({
         folder = await this.createUploadFolder(name, fps, pendingUpload.type);
         if (folder) {
           await this.uploadFiles(pendingUpload.name, folder, files, uploaded, skipTranscoding);
+          await this.declareFrameMetadata(pendingUpload, folder);
           this.remove(pendingUpload);
         }
       } else {
@@ -168,6 +169,24 @@ export default Vue.extend({
         uploadCls: GirderUploadManager,
       });
       return { folder, jobIds };
+    },
+    /**
+     * Declare the frame-metadata slot's files on the freshly-created dataset folder. Reuses the
+     * by-item-id declaration the Frame Metadata panel uses, so an arbitrary-named sidecar is
+     * marked frame metadata (never swept as an annotation) regardless of its name. Runs after
+     * the media upload's postprocess, which is enough: the folder's type marker is set at folder
+     * creation, so the declaration never races media transcoding.
+     */
+    async declareFrameMetadata(pendingUpload, folder) {
+      const frameMetadataFiles = pendingUpload.frameMetadataFiles ?? [];
+      for (let i = 0; i < frameMetadataFiles.length; i += 1) {
+        const file = frameMetadataFiles[i];
+        // eslint-disable-next-line no-await-in-loop -- declare each sidecar in turn
+        const ok = await importFrameMetadataFile(folder._id, file.name, file);
+        if (ok === false) {
+          throw new Error(`Failed to import frame metadata file "${file.name}"`);
+        }
+      }
     },
     /**
      * Upload a single camera dataset folder (used by multicam import).

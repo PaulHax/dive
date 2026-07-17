@@ -6,7 +6,10 @@ import { useRouter } from 'vue-router/composables';
 
 import {
   ImageSequenceType, VideoType, DefaultVideoFPS, FPSOptions, LargeImageType,
+  inputAnnotationFileTypes, websafeVideoTypes, otherVideoTypes,
+  websafeImageTypes, otherImageTypes, getLargeImageFileAccept,
 } from 'dive-common/constants';
+import suggestUploadSlots from 'platform/web-girder/uploadSlots';
 
 import {
   fileSuffixRegex,
@@ -30,7 +33,6 @@ import {
 } from 'platform/web-girder/api';
 import type {
   IgnoredUploadFile,
-  ValidatedUploadRoleMap,
 } from 'platform/web-girder/api';
 import { buildValidatedUploadPackage } from 'platform/web-girder/uploadPackage';
 import {
@@ -76,18 +78,25 @@ export interface PendingUpload {
   createSubFolders: boolean;
   name: string;
   files: InteralFiles[];
+  /**
+   * Per-role upload slots. The user declares each file's role by which slot it goes in.
+   * Media/annotation/config placement is a suggestion the server re-validates at upload;
+   * only the frame-metadata slot is binding, so an arbitrary-named sidecar is never read as
+   * an annotation CSV.
+   */
+  mediaList: File[];
+  annotationFile: File | null;
+  configFile: File | null;
+  /** Arbitrary-named frame-metadata sidecars, declared by slot (image-sequence only). */
+  frameMetadataFiles: File[];
+  /** Media/annotation/config package the server validated for upload (rebuilt at start). */
   uploadFiles: File[];
-  roles: ValidatedUploadRoleMap;
   ignored: IgnoredUploadFile[];
   type: DatasetType | 'zip';
   fps: number;
   uploading: boolean;
   skipTranscoding?: boolean;
 }
-
-const emptyRoleMap = (): ValidatedUploadRoleMap => ({
-  media: [], annotations: [], datasetConfig: [], frameMetadata: [],
-});
 
 interface GirderUpload {
   formatSize: (a: number) => string;
@@ -197,8 +206,11 @@ export default defineComponent({
         createSubFolders: false,
         name: defaultFilename,
         files: [],
+        mediaList: allFiles,
+        annotationFile: null,
+        configFile: null,
+        frameMetadataFiles: [],
         uploadFiles: allFiles,
-        roles: emptyRoleMap(),
         ignored: [],
         type: 'zip',
         fps,
@@ -206,12 +218,47 @@ export default defineComponent({
       });
     };
 
+    // Accept filters per slot, mirroring the file dialog's own filters.
+    const filterFileUpload = (type: DatasetType | 'meta' | 'annotation' | 'frameMetadata') => {
+      if (type === 'meta') {
+        return '.json';
+      }
+      if (type === 'annotation') {
+        return inputAnnotationFileTypes.map((item) => `.${item}`).join(',');
+      }
+      if (type === 'frameMetadata') {
+        return '.csv,.txt';
+      }
+      if (type === 'video') {
+        return websafeVideoTypes.concat(otherVideoTypes);
+      }
+      if (type === 'large-image') {
+        return getLargeImageFileAccept();
+      }
+      return websafeImageTypes.concat(otherImageTypes);
+    };
+
+    // Media/annotation/config slot files, in a single list, for server validation.
+    const slotFileList = (pendingUpload: PendingUpload): File[] => [
+      ...pendingUpload.mediaList,
+      ...(pendingUpload.annotationFile ? [pendingUpload.annotationFile] : []),
+      ...(pendingUpload.configFile ? [pendingUpload.configFile] : []),
+    ];
+
     const addPendingUpload = async (
       allFiles: File[],
       suggestedFps?: number, // suggested FPS for large/images
       expectedType?: DatasetType,
     ) => {
-      const validation = (await validateUploadGroup(allFiles.map((f) => f.name))).data;
+      const slots = suggestUploadSlots(allFiles);
+      // Validate the media/annotation/config selection (not frame metadata) so the media type
+      // is server-determined and an invalid batch is blocked before a pending row appears.
+      const nonFrameMeta = [
+        ...slots.mediaList,
+        ...(slots.annotationFile ? [slots.annotationFile] : []),
+        ...(slots.configFile ? [slots.configFile] : []),
+      ];
+      const validation = (await validateUploadGroup(nonFrameMeta.map((f) => f.name))).data;
       if (!validation.ok) {
         // Block: surface the reason and do not create an uploadable pending row.
         if (validation.message) {
@@ -220,24 +267,36 @@ export default defineComponent({
         throw new Error(validation.message || 'Upload validation failed');
       }
       const uploadType = expectedType === LargeImageType ? LargeImageType : validation.type;
-      // Server validation is the single authority for what uploads; the browser
-      // never re-classifies. uploadFiles is the original File objects, in the
-      // server's upload order.
-      const { uploadFiles, roles, ignored } = buildValidatedUploadPackage(allFiles, validation);
+      // Server validation is authoritative for the media/annotation/config roles; the frame
+      // metadata slot is uploaded and declared separately (see prepAndUpload).
+      const { uploadFiles, ignored } = buildValidatedUploadPackage(nonFrameMeta, validation);
+      // Frame metadata is read only for image sequences (Decision D4); on any other media type
+      // a reserved-name sidecar suggestion is surfaced as ignored, never silently dropped.
+      const isImageSequence = uploadType === ImageSequenceType;
+      const droppedFrameMetadata = isImageSequence ? [] : slots.frameMetadataFiles;
       const fps = suggestedFps || clientSettings.annotationFPS || DefaultVideoFPS;
-      const defaultFilename = roles.media[0] ?? uploadFiles[0]?.name ?? '';
+      const defaultFilename = slots.mediaList[0]?.name ?? uploadFiles[0]?.name ?? '';
       // Only a multi-video upload fans out into per-video subfolders.
-      const createSubFolders = validation.type === VideoType && roles.media.length > 1;
+      const createSubFolders = validation.type === VideoType && slots.mediaList.length > 1;
       pendingUploads.value.push({
         createSubFolders,
         name:
-          uploadFiles.length > 1
+          slots.mediaList.length > 1
             ? defaultFilename.replace(fileSuffixRegex, '')
             : defaultFilename,
         files: [],
+        mediaList: slots.mediaList,
+        annotationFile: slots.annotationFile,
+        configFile: slots.configFile,
+        frameMetadataFiles: isImageSequence ? slots.frameMetadataFiles : [],
         uploadFiles,
-        roles,
-        ignored,
+        ignored: [
+          ...ignored,
+          ...droppedFrameMetadata.map((file) => ({
+            name: file.name,
+            reason: 'Frame metadata is not supported for this media type',
+          })),
+        ],
         type: uploadType,
         fps,
         uploading: false,
@@ -645,19 +704,35 @@ export default defineComponent({
     const getFilenameInputValue = (pendingUpload: PendingUpload) => (
       pendingUpload.createSubFolders && pendingUpload.type !== 'zip' ? 'default' : pendingUpload.name
     );
-    const roleSummaryLines = (pendingUpload: PendingUpload): string[] => {
-      const { roles } = pendingUpload;
-      const lines: string[] = [];
-      const pushLine = (count: number, noun: string) => {
-        if (count > 0) {
-          lines.push(`${count} ${noun}${count === 1 ? '' : 's'}`);
+    /**
+     * Rebuild every non-zip row's validated media/annotation/config package from its
+     * (possibly edited) slots, then start the shared Girder upload. The server stays the
+     * authority for those roles; the frame-metadata slot rides along on the pending row and is
+     * uploaded and declared per-file after the media upload (see UploadGirder.declareFrameMetadata).
+     */
+    const prepAndUpload = async (uploadFn: () => Promise<void>) => {
+      preUploadErrorMessage.value = null;
+      try {
+        for (let i = 0; i < pendingUploads.value.length; i += 1) {
+          const pendingUpload = pendingUploads.value[i];
+          if (pendingUpload.type !== 'zip') {
+            const nonFrameMeta = slotFileList(pendingUpload);
+            // eslint-disable-next-line no-await-in-loop -- validate each row before upload
+            const validation = (await validateUploadGroup(nonFrameMeta.map((f) => f.name))).data;
+            if (!validation.ok) {
+              preUploadErrorMessage.value = validation.message || 'Upload validation failed';
+              return;
+            }
+            const { uploadFiles, ignored } = buildValidatedUploadPackage(nonFrameMeta, validation);
+            pendingUpload.uploadFiles = uploadFiles;
+            pendingUpload.ignored = ignored;
+          }
         }
-      };
-      pushLine(roles.media.length, 'media file');
-      pushLine(roles.annotations.length, 'annotation file');
-      pushLine(roles.datasetConfig.length, 'configuration file');
-      pushLine(roles.frameMetadata.length, 'frame metadata file');
-      return lines;
+      } catch (err) {
+        preUploadErrorMessage.value = err.response?.data?.message || err.message || String(err);
+        return;
+      }
+      await uploadFn();
     };
     const remove = (pendingUpload: PendingUpload) => {
       const index = pendingUploads.value.indexOf(pendingUpload);
@@ -734,7 +809,8 @@ export default defineComponent({
       getFilenameInputValue,
       getFilenameInputStateDisabled,
       getFilenameInputStateHint,
-      roleSummaryLines,
+      filterFileUpload,
+      prepAndUpload,
       addPendingUpload,
       remove,
       abort,
@@ -865,9 +941,9 @@ export default defineComponent({
                   type="number"
                   required
                   label="FPS"
-                  :append-icon="pendingUpload.roles.annotations.length
+                  :append-icon="pendingUpload.annotationFile
                     ? 'mdi-alert' : 'mdi-chevron-down'"
-                  :hint="pendingUpload.roles.annotations.length
+                  :hint="pendingUpload.annotationFile
                     ? 'should match annotation fps' : 'annotation fps'"
                   persistent-hint
                   @change="clientSettings.annotationFPS = $event"
@@ -887,15 +963,68 @@ export default defineComponent({
                 </v-btn>
               </v-col>
             </v-row>
-            <v-row v-if="pendingUpload.type !== 'zip'">
+            <v-row v-if="!pendingUpload.createSubFolders && pendingUpload.type !== 'zip'">
               <v-col class="py-0 mx-2">
-                <div
-                  v-for="line in roleSummaryLines(pendingUpload)"
-                  :key="line"
-                  class="text-body-2"
-                >
-                  {{ line }}
-                </div>
+                <v-row>
+                  <v-file-input
+                    v-model="pendingUpload.mediaList"
+                    multiple
+                    show-size
+                    counter
+                    :disabled="pendingUpload.uploading"
+                    :prepend-icon="
+                      ['image-sequence', 'large-image'].includes(pendingUpload.type)
+                        ? 'mdi-image-multiple'
+                        : 'mdi-file-video'
+                    "
+                    :label="
+                      pendingUpload.type === 'image-sequence'
+                        ? 'Image files'
+                        : pendingUpload.type === 'video'
+                          ? 'Video file'
+                          : 'Tiled Image files'
+                    "
+                    :rules="[val => (val || '').length > 0 || 'Media Files are required']"
+                    :accept="filterFileUpload(pendingUpload.type)"
+                  />
+                </v-row>
+                <v-row>
+                  <v-file-input
+                    v-model="pendingUpload.annotationFile"
+                    show-size
+                    counter
+                    prepend-icon="mdi-file-table"
+                    label="Annotation File (Optional)"
+                    hint="Optional"
+                    :disabled="pendingUpload.uploading"
+                    :accept="filterFileUpload('annotation')"
+                  />
+                </v-row>
+                <v-row>
+                  <v-file-input
+                    v-model="pendingUpload.configFile"
+                    show-size
+                    counter
+                    label="Configuration File (Optional)"
+                    hint="Optional"
+                    :disabled="pendingUpload.uploading"
+                    :accept="filterFileUpload('meta')"
+                  />
+                </v-row>
+                <v-row v-if="pendingUpload.type === 'image-sequence'">
+                  <v-file-input
+                    v-model="pendingUpload.frameMetadataFiles"
+                    multiple
+                    show-size
+                    counter
+                    prepend-icon="mdi-table-large"
+                    label="Frame Metadata File(s) (Optional)"
+                    hint="Per-frame metadata (.csv or .txt); may be several that merge by column"
+                    persistent-hint
+                    :disabled="pendingUpload.uploading"
+                    :accept="filterFileUpload('frameMetadata')"
+                  />
+                </v-row>
                 <div
                   v-if="pendingUpload.ignored.length"
                   class="mt-2"
@@ -1021,7 +1150,7 @@ export default defineComponent({
             large
             color="primary"
             class="my-6"
-            @click="upload"
+            @click="prepAndUpload(upload)"
           >
             <v-icon class="pr-3">
               mdi-upload
