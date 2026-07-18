@@ -146,6 +146,47 @@ def test_create_multicam_accepts_video_fps_sentinel(_verify, folder_cls, _aux, i
     assert saved_meta[constants.FPSMarker] == 10.0
 
 
+@patch('dive_server.crud_dataset.Item')
+@patch('dive_server.crud_dataset.crud.valid_images')
+@patch('dive_server.crud_dataset.Folder')
+@patch('dive_server.crud_dataset.crud.verify_dataset')
+def test_create_multicam_validates_video_camera_in_image_batch(
+    _verify, folder_cls, valid_images_mock, item_cls
+):
+    """A per-camera video type is validated against the video branch even when the batch
+    type is image-sequence: a video camera missing its processed video must raise, rather
+    than silently passing through the image-sequence frame-count branch.
+    """
+    user = {'login': 'tester'}
+    dataset_parent = _dataset_parent()
+    left = _child_folder('left-id', 'left')
+    right = _child_folder('right-id', 'right', media_type='video')
+
+    folder_cls.return_value.load.side_effect = lambda fid, **kwargs: {
+        'left-id': left,
+        'right-id': right,
+    }[fid]
+    valid_images_mock.return_value = [MagicMock(), MagicMock()]
+    # The video camera has no processed h264 video.
+    item_cls.return_value.findOne.return_value = None
+
+    data = {
+        'name': 'stereo-set',
+        'fps': 5,
+        'type': 'image-sequence',
+        'subType': 'stereo',
+        'defaultDisplay': 'left',
+        'cameraOrder': ['left', 'right'],
+        'cameras': {
+            'left': {'folderId': 'left-id'},
+            'right': {'folderId': 'right-id', 'type': constants.VideoType},
+        },
+    }
+
+    with pytest.raises(RestException, match='does not contain a processed video'):
+        crud_dataset.create_multicam(user, dataset_parent, data)
+
+
 @patch('dive_server.crud_dataset.crud.valid_images')
 @patch('dive_server.crud_dataset.Folder')
 @patch('dive_server.crud_dataset.crud.verify_dataset')

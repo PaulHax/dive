@@ -79,24 +79,42 @@ function resolveCameras(
     // (in precedence order) that defines the column in its header and has a row for that frame.
     // A defined column claims its cell even when the value is empty, so a higher-precedence blank
     // is not overwritten, while columns a source never defines stay open for fallback locations.
+    //
+    // Single precedence-ordered pass: walk each source's records once and, for every column that
+    // source defines, fill the frame's cell unless a higher-precedence source already claimed that
+    // (frame, column). Equivalent to a column-outer loop but visits each record cell once instead
+    // of re-walking every source's full record set once per output column.
+    const positionByColumn = new Map<string, number>();
+    cameraColumns.forEach((column, position) => positionByColumn.set(column, position));
     const records: Record<number, string[]> = {};
-    cameraColumns.forEach((column, position) => {
-      const claimedFrames = new Set<number>();
-      parsed
-        .filter((source) => source.columns.includes(column))
-        .forEach((source) => {
-          Object.entries(source.records).forEach(([alignmentKey, values]) => {
-            const frame = index.frameByAlignmentKey.get(alignmentKey);
-            if (frame === undefined || claimedFrames.has(frame)) {
-              return;
-            }
-            claimedFrames.add(frame);
-            if (records[frame] === undefined) {
-              records[frame] = cameraColumns.map(() => '');
-            }
-            records[frame][position] = values[column] ?? '';
-          });
+    const claimedColumnsByFrame = new Map<number, Set<number>>();
+    parsed.forEach((source) => {
+      // cameraColumns is the union of every source's columns, so each column here has a position.
+      const sourceColumns = source.columns.map((column) => ({
+        column,
+        position: positionByColumn.get(column) as number,
+      }));
+      Object.entries(source.records).forEach(([alignmentKey, values]) => {
+        const frame = index.frameByAlignmentKey.get(alignmentKey);
+        if (frame === undefined) {
+          return;
+        }
+        // records[frame] and its claimed-column set are born together on first sight of the frame.
+        let claimedSet = claimedColumnsByFrame.get(frame);
+        if (claimedSet === undefined) {
+          records[frame] = cameraColumns.map(() => '');
+          claimedSet = new Set<number>();
+          claimedColumnsByFrame.set(frame, claimedSet);
+        }
+        const claimed = claimedSet;
+        sourceColumns.forEach(({ column, position }) => {
+          if (claimed.has(position)) {
+            return;
+          }
+          claimed.add(position);
+          records[frame][position] = values[column] ?? '';
         });
+      });
     });
 
     cameras[camera] = records;

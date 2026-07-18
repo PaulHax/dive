@@ -1,8 +1,12 @@
-// Counter and timestamp matchers for the frame-metadata cascade. Kept node-free (no imports) so
-// the same code runs in Electron and the browser renderer, and so it stays a pure sink in the
-// module graph (parser.ts -> matching.ts, with nothing imported back). The functions are generic
-// over the frame key `K`: the image-sequence path instantiates `K = alignment key (string)`; a
-// future video path instantiates `K = frame number` with no change here.
+// Counter and timestamp matchers for the frame-metadata cascade. Kept node-free (its only import is
+// the zero-import ./calendar leaf) so the same code runs in Electron and the browser renderer, and
+// so it stays a pure sink in the module graph (parser.ts -> matching.ts, with nothing imported
+// back). The functions are generic over the frame key `K`: the image-sequence path instantiates
+// `K = alignment key (string)`; a future video path instantiates `K = frame number` with no change.
+
+// `wallClockToEpoch` is the row-time half of the calendar->epoch conversion shared with
+// frameTimestamp.ts; both delegate to one leaf so the two halves of the join never disagree.
+import wallClockToEpoch from './calendar';
 
 type MatchRow = Record<string, string>;
 
@@ -85,32 +89,6 @@ const DATE_RE = /^(\d{4})[-/](0[1-9]|1[0-2])[-/](0[1-9]|[12]\d|3[01])$/;
 const TIME_RE = /^(2[0-3]|[01]\d):([0-5]\d):([0-5]\d)(?:\.(\d+))?$/;
 const ISO_RE = /^(\d{4})-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])T(2[0-3]|[01]\d):([0-5]\d):([0-5]\d)(?:\.(\d+))?(Z|[+-](?:2[0-3]|[01]\d):?[0-5]\d)?$/;
 const SPACE_RE = /^(\d{4})[-/](0[1-9]|1[0-2])[-/](0[1-9]|[12]\d|3[01]) (2[0-3]|[01]\d):([0-5]\d):([0-5]\d)(?:\.(\d+))? ([+-])(2[0-3]|[01]\d):?([0-5]\d)$/;
-
-// Wall-clock components -> epoch seconds treated as UTC, plus fractional seconds preserved as a
-// float. Returns undefined for a calendar-invalid date (e.g. Feb 30): the day sub-pattern accepts
-// 01-31 for every month, so a bad day would otherwise roll silently into the next month; the
-// round-trip check keeps the "strict, never a wrong instant" promise. Uses Date.UTC for the
-// calendar->epoch convention, matching frameTimestamp.ts:dateStampToSeconds.
-function wallClockToEpoch(
-  year: number,
-  month: number,
-  day: number,
-  hour: number,
-  minute: number,
-  second: number,
-  frac?: string,
-): number | undefined {
-  const millis = Date.UTC(year, month - 1, day, hour, minute, second);
-  const roundTrip = new Date(millis);
-  if (
-    roundTrip.getUTCFullYear() !== year
-    || roundTrip.getUTCMonth() !== month - 1
-    || roundTrip.getUTCDate() !== day
-  ) {
-    return undefined;
-  }
-  return millis / 1000 + (frac ? Number(`0.${frac}`) : 0);
-}
 
 // `+0000` | `-0800` | `+00:00` | `Z` | undefined -> seconds east of UTC. Naive (undefined) and `Z`
 // are both zero; epoch(UTC) = wallclock-as-UTC - offset.

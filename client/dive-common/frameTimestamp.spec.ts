@@ -36,6 +36,15 @@ describe('parseFrameTimestamp', () => {
     expect(parseFrameTimestamp('img_0000000001.png')).toBeUndefined();
   });
 
+  it('rejects an impossible calendar date instead of rolling it forward', () => {
+    // Jun 31 and Feb 30 do not exist; Date.UTC would silently roll them into the
+    // next month, so the round-trip guard must reject them (never a wrong instant).
+    expect(parseFrameTimestamp('cam_20250631_120000.jpg')).toBeUndefined();
+    expect(parseFrameTimestamp('cam_20250230_120000.jpg')).toBeUndefined();
+    // The last valid day of each still parses.
+    expect(parseFrameTimestamp('cam_20250630_120000.jpg')).toBe(Date.UTC(2025, 5, 30, 12, 0, 0) / 1000);
+  });
+
   it('is extension-agnostic (same stem, different extension)', () => {
     expect(parseFrameTimestamp('left_20230615_143022.tif'))
       .toBe(parseFrameTimestamp('left_20230615_143022.png'));

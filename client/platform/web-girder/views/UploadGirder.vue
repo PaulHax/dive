@@ -113,8 +113,17 @@ export default Vue.extend({
         folder = await this.createUploadFolder(name, fps, pendingUpload.type);
         if (folder) {
           await this.uploadFiles(pendingUpload.name, folder, files, uploaded, skipTranscoding);
-          await this.declareFrameMetadata(pendingUpload, folder);
-          this.remove(pendingUpload);
+          // The media dataset is created and uploaded at this point. A frame-metadata sidecar
+          // that fails to declare must not unwind the upload: doing so would orphan the finished
+          // dataset on the server and leave the pending row stuck for a duplicate retry. Surface
+          // the failure, but always retire the row (finally) and keep the dataset.
+          try {
+            await this.declareFrameMetadata(pendingUpload, folder);
+          } catch (err) {
+            this.$emit('error', { err, name: pendingUpload.name });
+          } finally {
+            this.remove(pendingUpload);
+          }
         }
       } else {
         while (files.length > 0) {

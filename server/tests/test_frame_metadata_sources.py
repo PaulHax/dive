@@ -68,7 +68,9 @@ def _descriptor(name: str):
 
 
 def _child_items_by_folder(folder_model, items_by_folder_id):
-    def child_items(folder):
+    # filters is the server-side sidecar pre-filter; the mock ignores it and returns the
+    # full per-folder list so the is_declared post-filter still decides membership.
+    def child_items(folder, filters=None):
         return items_by_folder_id.get(folder['_id'], [])
 
     folder_model.childItems.side_effect = child_items
@@ -119,7 +121,18 @@ def test_sources_single_camera_co_located_name_sorted_and_deduped(get_clone_root
             ],
         },
     }
-    folder_model.childItems.assert_called_once_with(dataset)
+    # The scan is scoped to a declared-sidecar superset query (no mediaFiles recorded here, so
+    # just the reserved-name and marker conditions), not a full-folder materialization. Assert
+    # against the shared query builder so the reserved-name rule has a single source of truth.
+    folder_model.childItems.assert_called_once_with(
+        dataset,
+        filters={
+            '$or': [
+                frame_metadata.frame_metadata_source_name_query(),
+                {f'meta.{constants.FrameMetadataMarker}': {'$exists': True}},
+            ],
+        },
+    )
 
 
 @patch('dive_server.crud_dataset.Folder')

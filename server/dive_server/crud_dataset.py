@@ -448,7 +448,23 @@ def _frame_metadata_source_items(
         )
         return (not explicit, str(item['name']).lower())
 
-    items = [item for item in Folder().childItems(folder) if is_declared(item)]
+    # Pre-filter server-side to the sidecar candidates instead of materializing every item in the
+    # folder -- a media root (the clone-scan target) can hold tens of thousands of image items, and
+    # this runs on every Dataset Info panel open and every opt-in pipeline launch. The $or is a
+    # superset of is_declared (reserved name, explicit marker, or a recorded mediaFiles name), so
+    # the exact is_declared post-filter below still decides membership. Mirrors crud.valid_images,
+    # which filters childItems this way rather than scanning the folder.
+    declared_conditions: List[Dict[str, Any]] = [
+        frame_metadata.frame_metadata_source_name_query(),
+        {f'meta.{constants.FrameMetadataMarker}': {'$exists': True}},
+    ]
+    if media_file_names:
+        declared_conditions.append({'name': {'$in': list(media_file_names)}})
+    items = [
+        item
+        for item in Folder().childItems(folder, filters={'$or': declared_conditions})
+        if is_declared(item)
+    ]
     return [
         {'itemId': str(item['_id']), 'name': item['name']}
         for item in sorted(items, key=declared_first)
@@ -1429,7 +1445,10 @@ def create_multicam(
         child_fps_by_name[name] = child_fps
         # Called for its validation side effect (e.g. a video camera missing its
         # processed video raises here); differing counts across cameras are allowed.
-        _child_media_frame_count(child, user, validated.type)
+        # Use the per-camera type -- a mixed-type multicam (e.g. an image-sequence batch
+        # with a video camera) must validate each child against its own type, not the
+        # batch type, or the video-missing check is skipped.
+        _child_media_frame_count(child, user, cam_type)
         loaded_children[name] = child
         camera_types_by_name[name] = cam_type
 

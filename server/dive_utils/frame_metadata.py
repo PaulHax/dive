@@ -31,6 +31,17 @@ def is_frame_metadata_source_name(name: str) -> bool:
     return basename.lower() in FRAME_METADATA_SOURCE_NAMES
 
 
+def frame_metadata_source_name_query() -> dict:
+    """Mongo predicate matching a declared frame-metadata sidecar by reserved basename.
+
+    The query-side mirror of is_frame_metadata_source_name: Girder item names are basenames
+    (no path separators) and ``lowerName`` is the lowercased name, so an exact ``$in`` over the
+    reserved set is exactly that predicate -- and, unlike a regex, it can use the ``lowerName``
+    index. Deriving it from the constant keeps the query from drifting as the reserved set changes.
+    """
+    return {'lowerName': {'$in': sorted(FRAME_METADATA_SOURCE_NAMES)}}
+
+
 def is_declared_frame_metadata(item: dict) -> bool:
     """A folder item is a declared frame-metadata sidecar.
 

@@ -1,4 +1,5 @@
 import type { FrameImage } from 'dive-common/apispec';
+import utcSecondsFromComponents from 'dive-common/frameMetadata/calendar';
 
 /**
  * Single source of truth for parsing a frame's capture timestamp out of its
@@ -30,9 +31,10 @@ function dateStampToSeconds(match: RegExpMatchArray): number | undefined {
   if (month < 1 || month > 12) return undefined;
   if (day < 1 || day > 31) return undefined;
   if (hour > 23 || minute > 59 || second > 59) return undefined;
-  const millis = Date.UTC(year, month - 1, day, hour, minute, second);
-  const fracSeconds = frac ? Number(`0.${frac}`) : 0;
-  return millis / 1000 + fracSeconds;
+  // Delegate the Date.UTC calendar->epoch conversion -- including the impossible-date round-trip
+  // guard that stops Jun 31 / Feb 30 rolling into the next month -- to the shared leaf, so this
+  // filename-time half and the row-time half (matching.ts) stay in lockstep.
+  return utcSecondsFromComponents(year, month, day, hour, minute, second, frac);
 }
 
 /*
