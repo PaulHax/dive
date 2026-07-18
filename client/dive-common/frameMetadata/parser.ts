@@ -1,6 +1,12 @@
 import { basicImageFileExtensions, largeImageFileExtensions } from 'dive-common/constants';
 import { parseDelimitedRows } from './csvTokenizer';
 import type { DelimitedTableDelimiter } from './csvTokenizer';
+import {
+  detectRowTime,
+  matchFramesToRows,
+  selectCounterColumn,
+} from './matching';
+import type { FrameRowMatch } from './matching';
 
 // Shared by the desktop backend and the web client. Keep this node-free so the same parser runs
 // in Electron and in the browser renderer.
@@ -21,6 +27,14 @@ interface ParsedFrameMetadata {
 interface FrameAlignmentIndex {
   alignmentKeys: Set<string>;
   frameByAlignmentKey: Map<string, number>;
+  // Fallback join inputs, attached only on the production media-name path
+  // (resolve.buildFrameAlignmentIndex) and absent on the raw-entry convenience path. Their absence
+  // is what keeps the counter and timestamp tiers dormant for the existing parser corpus.
+  //
+  // Tier 2: a frame stem's trailing counter -> that frame's alignment key.
+  alignmentKeyByCounter?: Map<number, string>;
+  // Tier 3: alignment key -> frame capture time (epoch seconds); timeless frames are absent.
+  secondsByAlignmentKey?: Map<string, number>;
 }
 
 // Mirror of the server's allValidLargeImageFormats (validImageFormats + validLargeImageFormats):
@@ -164,36 +178,15 @@ function projectRecord(row: FrameMetadataRow, fields: string[]): FrameMetadataRo
   return record;
 }
 
-function parseFrameMetadataSource(
-  text: string,
-  alignmentIndex: FrameAlignmentIndex | FrameAlignmentEntries,
+// Tier 1: filename-column join. A row's join-column cell normalizes to an alignment key; the record
+// is emitted under that key. Primary for image sequences and unchanged from the original behavior.
+function matchByFilename(
+  header: string[],
+  rows: FrameMetadataRow[],
+  alignmentKeys: Set<string>,
   sourceName?: string,
 ): ParsedFrameMetadata | null {
-  const index = isFrameAlignmentIndex(alignmentIndex)
-    ? alignmentIndex
-    : normalizeFrameAlignmentEntries(alignmentIndex);
-  const { alignmentKeys } = index;
-
-  if (text.includes('\0')) {
-    return null;
-  }
-  const content = text.charCodeAt(0) === 0xFEFF ? text.slice(1) : text;
-
-  const rawRows = readRows(content);
-  if (rawRows.length === 0) {
-    return null;
-  }
-
-  const { header, rows } = selectHeaderAndRows(rawRows);
-  if (header.length === 0 || rows.length === 0) {
-    return null;
-  }
-
-  const { joinColumn, candidates: joinCandidates } = selectJoinColumn(
-    header,
-    rows,
-    alignmentKeys,
-  );
+  const { joinColumn, candidates: joinCandidates } = selectJoinColumn(header, rows, alignmentKeys);
   if (joinColumn === null) {
     return null;
   }
@@ -219,6 +212,118 @@ function parseFrameMetadataSource(
   }
 
   return { sourceName, columns: recordFields, records };
+}
+
+// Emit records keyed by the matched frame's alignment key, so the resolver's key -> frame mapping
+// and column-merge logic are untouched. The counter/timestamp tiers keep every column as payload:
+// an integer or timestamp column is ordinary data, not a redundant multi-camera join key the way a
+// second image-filename column is, so nothing is dropped.
+function recordsFromMatch(
+  matched: FrameRowMatch<string>,
+  rows: FrameMetadataRow[],
+  recordFields: string[],
+): Record<string, FrameMetadataRow> {
+  const records = nullPrototypeRecord<FrameMetadataRow>();
+  matched.forEach((rowIndex, key) => {
+    records[key] = projectRecord(rows[rowIndex], recordFields);
+  });
+  return records;
+}
+
+// Tier 2: counter / frame-index join. The best-scoring integer column (by distinct matched frames)
+// binds rows to frames; every column stays payload. Requires a column beyond the matched counter so
+// a bare counter list has something to show -- the same payload guard tier 1 uses.
+function matchByCounter(
+  header: string[],
+  rows: FrameMetadataRow[],
+  alignmentKeyByCounter: Map<number, string>,
+  sourceName?: string,
+): ParsedFrameMetadata | null {
+  const hit = selectCounterColumn(header, rows, alignmentKeyByCounter);
+  if (hit === null) {
+    return null;
+  }
+  if (header.every((column) => column === hit.column)) {
+    return null;
+  }
+  // hit is non-null only when it matched >= 1 distinct frame, so records is always non-empty here.
+  return { sourceName, columns: header, records: recordsFromMatch(hit.matched, rows, header) };
+}
+
+// Tier 3: timestamp join. Detect a row-time column, place each frame on its nearest row within
+// tolerance, and require a column beyond the detected time column(s). Loud-failure (decision 5): a
+// detected time column that matches fewer than min(2, rows) distinct frames resolves to nothing
+// rather than degrading -- timestamp is the terminal tier before null, so a systematic clock offset
+// has no lower join to silently fall through into.
+function matchByTimestamp(
+  header: string[],
+  rows: FrameMetadataRow[],
+  secondsByAlignmentKey: Map<string, number>,
+  sourceName?: string,
+): ParsedFrameMetadata | null {
+  const detected = detectRowTime(header, rows);
+  if (detected === null) {
+    return null;
+  }
+  if (header.every((column) => detected.columns.includes(column))) {
+    return null;
+  }
+  const matched = matchFramesToRows(secondsByAlignmentKey, detected.secondsByRow);
+  if (matched.size < Math.min(2, rows.length)) {
+    return null;
+  }
+  // The threshold above guarantees >= 1 matched frame, so records is always non-empty here.
+  return { sourceName, columns: header, records: recordsFromMatch(matched, rows, header) };
+}
+
+function parseFrameMetadataSource(
+  text: string,
+  alignmentIndex: FrameAlignmentIndex | FrameAlignmentEntries,
+  sourceName?: string,
+): ParsedFrameMetadata | null {
+  const index = isFrameAlignmentIndex(alignmentIndex)
+    ? alignmentIndex
+    : normalizeFrameAlignmentEntries(alignmentIndex);
+
+  if (text.includes('\0')) {
+    return null;
+  }
+  const content = text.charCodeAt(0) === 0xFEFF ? text.slice(1) : text;
+
+  const rawRows = readRows(content);
+  if (rawRows.length === 0) {
+    return null;
+  }
+
+  const { header, rows } = selectHeaderAndRows(rawRows);
+  if (header.length === 0 || rows.length === 0) {
+    return null;
+  }
+
+  // Cascade: filename join (primary) -> counter join -> timestamp join -> null. Each tier is an
+  // evidence-based value join; the first that matches wins. The counter and timestamp tiers fire
+  // only when the resolver supplied their maps (the production media-name path), so the raw-entry
+  // corpus keeps ending at null exactly as before.
+  const filenameMatch = matchByFilename(header, rows, index.alignmentKeys, sourceName);
+  if (filenameMatch !== null) {
+    return filenameMatch;
+  }
+
+  const counterMatch = index.alignmentKeyByCounter !== undefined
+    ? matchByCounter(header, rows, index.alignmentKeyByCounter, sourceName)
+    : null;
+  if (counterMatch !== null) {
+    return counterMatch;
+  }
+
+  const timestampMatch = index.secondsByAlignmentKey !== undefined
+    ? matchByTimestamp(header, rows, index.secondsByAlignmentKey, sourceName)
+    : null;
+  if (timestampMatch !== null) {
+    return timestampMatch;
+  }
+
+  return null;
 }
 
 function readRows(text: string): string[][] {

@@ -203,3 +203,65 @@ describe('resolveCameras', () => {
     expect(resolved.columns.singleCam).toBeUndefined();
   });
 });
+
+describe('resolveCameras fallback joins', () => {
+  it('resolves a counter-joined sidecar end to end', () => {
+    // Date-only media names -> no capture time; the counter column binds rows to frames.
+    const index = buildFrameAlignmentIndex(['cam_00173.jpg', 'cam_00174.jpg', 'cam_00175.jpg']);
+    const text = ['frame_count,depth,pass', '173,102.5,1', '174,103.1,1', '175,104.7,1', ''].join('\n');
+    const resolved = resolveCameras({ cam: [['log.csv', text]] }, { cam: index });
+
+    expect(resolved.columns.cam).toEqual(['frame_count', 'depth', 'pass']);
+    expect(resolved.cameras.cam[0]).toEqual(['173', '102.5', '1']);
+    expect(resolved.cameras.cam[2]).toEqual(['175', '104.7', '1']);
+    expect(resolved.sources.cam).toEqual(['log.csv']);
+  });
+
+  it('resolves a timestamp-joined sidecar end to end', () => {
+    const index = buildFrameAlignmentIndex([
+      'dive_20240601_123000.jpg', 'dive_20240601_123005.jpg', 'dive_20240601_123010.jpg',
+    ]);
+    const text = [
+      'filename,date,time,depth',
+      'orig_0001.jpg,2024-06-01,12:30:01,102.5',
+      'orig_0002.jpg,2024-06-01,12:30:06,103.1',
+      'orig_0003.jpg,2024-06-01,12:30:11,104.7',
+      '',
+    ].join('\n');
+    const resolved = resolveCameras({ cam: [['telemetry.csv', text]] }, { cam: index });
+
+    expect(resolved.columns.cam).toEqual(['filename', 'date', 'time', 'depth']);
+    expect(resolved.cameras.cam[0]).toEqual(['orig_0001.jpg', '2024-06-01', '12:30:01', '102.5']);
+    expect(resolved.cameras.cam[2][3]).toBe('104.7');
+  });
+
+  it('binds one shared counter log to each camera in a multicam dataset', () => {
+    // PORT/STAR media share the counter space, so a single dataset-level log resolves per camera.
+    const shared = ['frame_count,depth', '173,10', '174,12', ''].join('\n');
+    const resolved = resolveCameras(
+      { port: [['log.csv', shared]], star: [['log.csv', shared]] },
+      {
+        port: buildFrameAlignmentIndex(['P_00173.jpg', 'P_00174.jpg']),
+        star: buildFrameAlignmentIndex(['S_00173.jpg', 'S_00174.jpg']),
+      },
+    );
+
+    expect(resolved.cameras.port[0]).toEqual(['173', '10']);
+    expect(resolved.cameras.star[0]).toEqual(['173', '10']);
+    expect(resolved.cameras.star[1]).toEqual(['174', '12']);
+  });
+
+  it('omits a camera when a parseable time column matches no frame (loud failure)', () => {
+    const index = buildFrameAlignmentIndex(['dive_20240601_123000.jpg', 'dive_20240601_123005.jpg']);
+    const text = [
+      'filename,date,time,depth',
+      'orig_0001.jpg,2020-01-01,00:00:00,1',
+      'orig_0002.jpg,2020-01-01,00:00:05,2',
+      '',
+    ].join('\n');
+    const resolved = resolveCameras({ cam: [['telemetry.csv', text]] }, { cam: index });
+
+    expect(resolved.cameras.cam).toBeUndefined();
+    expect(resolved.sources.cam).toBeUndefined();
+  });
+});

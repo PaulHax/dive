@@ -1,14 +1,41 @@
 import type { ResolvedFrameMetadata } from 'dive-common/apispec';
-import { frameAlignmentIndexFromEntries, parseFrameMetadataSource } from './parser';
+import { imageSequenceFrameTimes } from 'dive-common/frameTimeProviders';
+import {
+  frameAlignmentIndexFromEntries,
+  normalizeAlignmentKey,
+  parseFrameMetadataSource,
+} from './parser';
 import type { FrameAlignmentIndex, ParsedFrameMetadata } from './parser';
+import { extractCounter } from './matching';
 
 type CameraCandidateTexts = Record<string, [sourceName: string, rawText: string][]>;
 type CameraFrameAlignmentIndexes = Record<string, FrameAlignmentIndex>;
 
 // The read path must tolerate duplicate basenames because rejecting here would hide all metadata
 // for the camera. Later media entries win for consistency with the ordered media list.
+//
+// Alongside the filename index, derive the counter index (trailing digit-run -> alignment key) and
+// the frame-time map (alignment key -> capture seconds via the image-sequence provider) that power
+// the counter and timestamp fallback joins. Both are attached here, on the media-name path only, so
+// the raw-entry parser path leaves those tiers dormant. Duplicate stems: later media wins, matching
+// frameByAlignmentKey.
 function buildFrameAlignmentIndex(mediaNames: string[]): FrameAlignmentIndex {
-  return frameAlignmentIndexFromEntries(mediaNames.map((name, frame) => [name, frame]));
+  const base = frameAlignmentIndexFromEntries(mediaNames.map((name, frame) => [name, frame]));
+  const frameTimes = imageSequenceFrameTimes(mediaNames);
+  const alignmentKeyByCounter = new Map<number, string>();
+  const secondsByAlignmentKey = new Map<string, number>();
+  mediaNames.forEach((name, frame) => {
+    const key = normalizeAlignmentKey(name);
+    const counter = extractCounter(key);
+    if (counter !== undefined) {
+      alignmentKeyByCounter.set(counter, key);
+    }
+    const seconds = frameTimes.get(frame);
+    if (seconds !== undefined) {
+      secondsByAlignmentKey.set(key, seconds);
+    }
+  });
+  return { ...base, alignmentKeyByCounter, secondsByAlignmentKey };
 }
 
 function unionColumns(sources: ParsedFrameMetadata[]): string[] {

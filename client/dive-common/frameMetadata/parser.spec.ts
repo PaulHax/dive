@@ -700,3 +700,83 @@ describe('shared frame-metadata naming', () => {
     });
   });
 });
+
+// The counter and timestamp fallbacks fire only on the media-name path, where buildFrameAlignmentIndex
+// derives the trailing-counter index and the frame-time map. These sources have no filename column
+// that matches the media, so tier 1 declines and the cascade falls through.
+describe('frame-metadata cascade fallback joins', () => {
+  it('joins a counter column against filename counters (tier 2)', () => {
+    // Date-only media names carry no capture time, so only the counter join can bind rows to frames.
+    const index = buildFrameAlignmentIndex(['cam_00173.jpg', 'cam_00174.jpg', 'cam_00175.jpg']);
+    const text = [
+      'frame_count,date,lat,pass',
+      '173,145.00,-124.60,1', // `date` holds ADC decimals (not a counter, not a time); `pass` is constant
+      '174,146.30,-124.61,1',
+      '175,147.10,-124.62,1',
+      '900,148.00,-124.63,1', // a different site's row: its counter is not among the media
+      '',
+    ].join('\n');
+
+    const source = parseFrameMetadataSource(text, index, 'log.csv');
+
+    expect(source).not.toBeNull();
+    expect(source?.columns).toEqual(['frame_count', 'date', 'lat', 'pass']);
+    // The distinct-count winner is frame_count; every column (incl. the counter and the constant
+    // `pass`) stays payload; the out-of-range 900 row is unmatched -- honest partial coverage.
+    expect(Object.keys(source?.records || {}).sort()).toEqual(['cam_00173', 'cam_00174', 'cam_00175']);
+    expect(source?.records.cam_00173).toEqual({
+      frame_count: '173', date: '145.00', lat: '-124.60', pass: '1',
+    });
+  });
+
+  it('joins date + time columns to frame timestamps when the filename column does not match (tier 3)', () => {
+    const index = buildFrameAlignmentIndex([
+      'dive_20240601_123000.jpg', 'dive_20240601_123005.jpg',
+      'dive_20240601_123010.jpg', 'dive_20240601_123015.jpg',
+    ]);
+    // Rows carry a filename column that matches no media (renamed export), plus date/time one second
+    // after each frame -- inside the 2.5 s tolerance (half the 5 s row cadence).
+    const text = [
+      'filename,date,time,depth',
+      'orig_0001.jpg,2024-06-01,12:30:01,102.5',
+      'orig_0002.jpg,2024-06-01,12:30:06,103.1',
+      'orig_0003.jpg,2024-06-01,12:30:11,104.7',
+      'orig_0004.jpg,2024-06-01,12:30:16,106.2',
+      '',
+    ].join('\n');
+
+    const source = parseFrameMetadataSource(text, index, 'telemetry.csv');
+
+    expect(source).not.toBeNull();
+    expect(Object.keys(source?.records || {}).sort()).toEqual([
+      'dive_20240601_123000', 'dive_20240601_123005',
+      'dive_20240601_123010', 'dive_20240601_123015',
+    ]);
+    expect(source?.records.dive_20240601_123000).toEqual({
+      filename: 'orig_0001.jpg', date: '2024-06-01', time: '12:30:01', depth: '102.5',
+    });
+    expect(source?.records.dive_20240601_123015.depth).toBe('106.2');
+  });
+
+  it('resolves to null when row times parse but no frame is within tolerance (loud failure)', () => {
+    const index = buildFrameAlignmentIndex([
+      'dive_20240601_123000.jpg', 'dive_20240601_123005.jpg',
+    ]);
+    // A parseable time column whose instants are years from the media: must resolve to nothing
+    // rather than silently degrade to another join.
+    const text = [
+      'filename,date,time,depth',
+      'orig_0001.jpg,2020-01-01,00:00:00,1',
+      'orig_0002.jpg,2020-01-01,00:00:05,2',
+      '',
+    ].join('\n');
+
+    expect(parseFrameMetadataSource(text, index, 'telemetry.csv')).toBeNull();
+  });
+
+  it('still rejects an arbitrary table on the media-name path (no blind row-order)', () => {
+    const index = buildFrameAlignmentIndex(['img001.png', 'img002.png']);
+    // No filename match, no integer counter match, no parseable time -> null, exactly as before.
+    expect(parseFrameMetadataSource('note,value\nhello,world\n', index)).toBeNull();
+  });
+});

@@ -53,6 +53,18 @@ const FRAME_TIMESTAMP_PATTERNS: FrameTimestampPattern[] = [
     toSeconds: dateStampToSeconds,
   },
   {
+    // Dot-separated nav convention: YYYYMMDD.HHMMSS.<counter>, e.g.
+    // 20181101.155406.00082.jpg. Integer seconds ONLY -- the trailing ".<counter>" is a frame
+    // counter, matched by the non-capturing `\.\d+` and discarded, never read as fractional
+    // seconds (sub-second precision comes from a metadata row's own time column). The literal
+    // dots between all three fields distinguish this from the `[_-]?`-separated datestamp above,
+    // whose optional fractional group would otherwise swallow the counter. Placed before the
+    // epoch patterns so a counter that happens to be 10/13 digits is not misread as an epoch.
+    name: 'nav-datestamp',
+    regex: /(?<!\d)(\d{4})(\d{2})(\d{2})\.(\d{2})(\d{2})(\d{2})\.\d+(?!\d)/,
+    toSeconds: dateStampToSeconds,
+  },
+  {
     // bare epoch milliseconds, e.g. img_1719843225123.tif
     name: 'epoch-millis',
     regex: /(?<!\d)(\d{13})(?!\d)/,

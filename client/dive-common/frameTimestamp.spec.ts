@@ -42,6 +42,49 @@ describe('parseFrameTimestamp', () => {
   });
 });
 
+describe('parseFrameTimestamp -- dot-separated nav convention', () => {
+  it('parses YYYYMMDD.HHMMSS.<counter> to the integer-second instant', () => {
+    // 2018-11-01 15:54:06 UTC; the ".00082" is a frame counter, NOT fractional seconds.
+    expect(parseFrameTimestamp('20181101.155406.00082.jpg')).toBe(1541087646);
+  });
+
+  it('ignores the counter value (same instant, different counter)', () => {
+    expect(parseFrameTimestamp('20181101.155406.00001.jpg')).toBe(1541087646);
+  });
+
+  it('does not read the counter as fractional seconds', () => {
+    // A frac-consuming parse would yield 1541087646.00082; assert the exact integer instead.
+    expect(parseFrameTimestamp('20181101.155406.00082.jpg')).not.toBeCloseTo(1541087646.00082, 6);
+  });
+
+  it('tolerates a camera/prefix segment before the datestamp', () => {
+    expect(parseFrameTimestamp('port_20181101.155406.00082.jpg')).toBe(1541087646);
+  });
+
+  it('parses an end-of-day time with a wide counter', () => {
+    // 2020-06-30 23:59:59 UTC.
+    expect(parseFrameTimestamp('dive_20200630.235959.99999.png')).toBe(1593561599);
+  });
+
+  it('is not fooled by a 10-digit counter (beats the epoch fallback)', () => {
+    expect(parseFrameTimestamp('20181101.155406.1234567890.jpg')).toBe(1541087646);
+  });
+
+  it('leaves a two-part YYYYMMDD.HHMMSS (no counter) unmatched', () => {
+    expect(parseFrameTimestamp('20181101.155406.jpg')).toBeUndefined();
+  });
+
+  it('leaves a date-only stem unmatched (no midnight anchor)', () => {
+    // No time-of-day; the counter tier -- not parseFrameTimestamp -- serves this data.
+    expect(parseFrameTimestamp('cam1_20240708_seq00173.jpg')).toBeUndefined();
+  });
+
+  it('rejects an out-of-range time via the shared plausibility guard', () => {
+    // hour 25 -> dateStampToSeconds returns undefined; no epoch fallback matches.
+    expect(parseFrameTimestamp('20181101.256080.00082.jpg')).toBeUndefined();
+  });
+});
+
 describe('attachFrameTimestamps', () => {
   it('populates timestamp in place from each frame filename', () => {
     const frames: FrameImage[] = [
